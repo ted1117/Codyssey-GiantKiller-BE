@@ -1,6 +1,6 @@
-# Progress: 회원·가족·초대 및 PRD-003 가족 확인
+# Progress: 회원·가족·초대, 가족 확인 및 알림 설계
 
-Last updated: 2026-10-30 KST
+Last updated: 2026-10-31 KST
 
 ## Goal
 
@@ -10,13 +10,17 @@ Last updated: 2026-10-30 KST
 
 ## Current Status
 
-- Status: Ready for review (가족 확인 서버 구현 1~3단계)
-- Current focus: 자녀 사칭 확인 서버 범위 검토. 실제 AI·FCM 연결은 후속이며 앱 설치 연관 분석은 보류
-- Branch: `feature/child-verification`
+- Status: PRD-004 독립 FID 관리·발송 서비스 구현 및 자동 테스트 완료, 실제 기기 연동 미검증
+- Current focus: 독립 FCM 기능 검토. 가족 확인 호출 연결·실제 AI 연결·앱 설치 연관 분석은 후속
+- Branch: `feature/push-notifications` (2026-10-31 전환 확인)
 - Related issue/PR: 없음
 
 ## Decisions
 
+- 2026-10-31: 사용자 지시에 따라 FCM 등록 토큰 대신 FID로 전환했다. API는 `/users/me/push-registrations`, 입력은 `fid`·`previous_fid`, DB는 `PushRegistration.fid`, 발송은 `Message(fid=...)`를 사용한다.
+- 2026-10-31: PRD-004는 가족 확인 서비스와 연결하지 않고 FID 관리·내부 FCM 발송 기능을 독립적으로 설계한다.
+- 2026-10-31: 사용자당 여러 앱 FID를 지원하고 모두 발송한다. 별도 기기 등록·기기 정보 관리 없이 로그인 사용자와 FCM에 등록된 FID만 연결한다.
+- 2026-10-31: 서버의 제목·안내 문구와 사건 ID를 `notification + data`로 전달한다. 문구는 표시하고 사건 ID는 알림 선택 후 관련 화면 이동에 사용한다.
 - 2026-10-30: 사용자가 PostgreSQL 유지를 확인했다. AGENTS.md의 SQLite 기술 스택은 적용하지 않는다.
 - 2026-10-30: Python은 기존 프로젝트 설정인 3.14를 유지했다.
 - 2026-10-30: FastAPI Users 어댑터와 호환되는 SQLAlchemy 2.0.55를 사용한다.
@@ -60,10 +64,26 @@ Last updated: 2026-10-30 KST
 - [x] 신규 스키마 17개·서비스 및 API 27개 테스트, 전체 119개와 Ruff 통과
 - [x] 기동 직후·30초 간격 자동 만료와 종료 시 작업·DB 연결 정리
 - [x] 신규 주기 작업·lifespan 테스트 8개, 임시 PostgreSQL 18에서 전체 127개 및 Ruff 통과
+- [x] PRD-004 최소 FID 모델·저장소·마이그레이션과 인증된 등록·교체·연결 해제 API
+- [x] 독립 FCM 발송, 고정 문구·ID·응답 액션, 부분 실패·무효 FID 정리·원문 없는 로그
+- [x] 신규 테스트 22개, 새 PostgreSQL 18에서 전체 149개와 Ruff 검사·포맷 통과
 
 ## In Progress
 
-- 없음. 합의한 가족 확인 서버 범위의 구현 1~3단계를 완료했다.
+- PRD-004 독립 서버 기능을 구현하고 `docs/SPEC/SPEC-004.md`에 결과를 반영했다. 실제 FCM·Android 수신 검증은 남아 있다.
+- 가족 확인 서버 범위의 구현 1~3단계는 완료 상태를 유지한다.
+
+## 후속 설계: PRD-004 알림 관리
+
+- FID 등록·갱신 PUT과 연결 해제 DELETE, 최소 `PushRegistration` 모델, 내부 `PushService`를 구현했다.
+- 기존 `NotificationRequest` 자동 처리와 가족 확인·사건 서비스 호출 연결은 하지 않는다.
+- 큐·주기 발송·애플리케이션 자동 재시도·복구·SMS는 최소 구현에서 제외했다.
+- FID 교체·계정 전환·로그아웃 연결 해제 실패, FCM 접수와 실제 수신의 차이를 명시했다.
+- Android 표시 방식과 SDK 호환성, 실제 기기 발송은 연동 검증이 필요하다.
+- AndroidManifest의 FID 등록 활성화와 `onRegistered(installationId)` 콜백으로 FCM에 등록된 FID를 업로드하는 계약을 README·SPEC에 명시했다. 기존 등록 토큰을 FID로 이름만 바꿔 사용하지 않는다.
+- PR #3 검토 반영: Admin SDK 7.7.0의 동기 인증 I/O를 확인하고 초기화·인증·`send_each` 전체를 worker thread로 옮겼다. 초기화와 인증 포함 발송 대기 중 이벤트 루프 진행을 검사하는 회귀 테스트 2개를 추가했다.
+- PR #3 검토 반영: `fid`·`previous_fid` 공통 검증에서 NUL(U+0000)을 거부한다. PUT 두 필드·DELETE의 FID에 대해 원문 없는 422 응답과 기존 데이터 보존을 검증하는 API 회귀 테스트 3개를 추가했다.
+- FID DB → API → 내부 발송·자동 검증을 완료했다. 기존 프로젝트 DB에는 적용하지 않았다.
 
 ## 후속 설계: PRD-003 가족 확인
 
@@ -92,11 +112,13 @@ Last updated: 2026-10-30 KST
 
 ## Next Steps
 
-1. 가족 확인 서버 구현 1~3단계 코드 검토
-2. 자녀 사칭 확인에 필요한 후속 PRD의 실제 AI 입력·FCM 발송 연결. 앱 설치 연관 분석은 진행하지 않는다.
+1. SPEC-004 독립 FID 관리·FCM 발송 구현 검토
+2. 실제 Firebase 테스트 기기 발송·Android 수신 검증
+3. 가족 확인·AI 분석 호출 연결은 별도 후속. 앱 설치 연관 분석은 진행하지 않는다.
 
 ## Changed Files
 
+- 2026-10-31 PRD-004: `app/models/push_registration.py`, `app/repositories/push_registration.py`, `app/schemas/push.py`, `app/services/push_registration.py`, `app/services/push.py`, `app/core/fcm.py`, `app/api/v1/push_registrations.py`, `migrations/versions/0003_push_registrations.py`, 모델 export·API dependency·router, 신규 테스트 2개 파일·기존 OpenAPI 테스트, README·PRD-004·SPEC-004·진행 문서. PRD에는 사용자 지시대로 FID 전환을 반영했다. 기존 DB는 변경하지 않았다.
 - 이번 PRD-003 단계: `app/models/event.py`, `verification.py`, `notification.py`, `__init__.py`; `app/repositories/event.py`, `verification.py`, `notification.py`; `migrations/versions/0002_verification.py`; `tests/test_verification_storage.py`; 관련 PRD·SPEC·진행 문서
 - PRD-003 구현 2단계: `app/schemas/verification.py`, `app/services/verification.py`, `app/api/v1/verify.py`, API dependency·router, 사건·가족·확인 저장소의 필요한 조회 보완, 신규 스키마·서비스 테스트, 기존 OpenAPI 테스트
 - PRD-003 구현 3단계: `app/main.py`, `app/services/verification.py`, `tests/conftest.py`, `tests/test_verification_worker.py`, 관련 진행·요구사항·설계 문서
@@ -147,8 +169,9 @@ docker compose --env-file /dev/null config --quiet
 
 ## Test Status
 
-- Last passing: 가족 확인 서버 구현 3단계 기준 임시 PostgreSQL 18 전체 127개와 Ruff 검사·포맷 통과
-- 이번 실행: `TEST_DATABASE_URL`을 새 테스트 컨테이너로 지정해 `uv run --no-sync pytest -q`, 127 passed in 19.00s
+- Last passing: PR #3 FID NUL 검증 수정 기준 임시 PostgreSQL 18 전체 154개와 Ruff 검사·포맷 통과
+- 이번 실행: `TEST_DATABASE_URL`을 새 NUL 검증 테스트 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-prd004-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning`, 154 passed in 18.86s, 경고 0개
+- SDK 메시지 직렬화의 `fid` 키와 `token` 키 부재, 레거시 `token`·`previous_token` 요청 거부를 검증했다.
 - 이전 PRD-001 검증: 전체 49개, Docker 빌드·마이그레이션·앱 실행, Compose 설정. 이번 DB 단계에서 이미지 빌드는 재실행하지 않았다.
 - Failing: 없음
 - Not run: 기존 프로젝트 DB에 대한 마이그레이션 적용, 실제 앱·웹의 초대 링크 연결
