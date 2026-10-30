@@ -546,6 +546,7 @@ def test_configured_invitation_link_and_openapi(
             f"{PREFIX}/auth/register",
             f"{PREFIX}/auth/login",
             f"{PREFIX}/users/me",
+            f"{PREFIX}/users/me/push-registrations",
             f"{PREFIX}/families",
             f"{PREFIX}/families/{{family_id}}",
             f"{PREFIX}/families/{{family_id}}/invitations",
