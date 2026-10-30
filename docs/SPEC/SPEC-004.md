@@ -176,7 +176,7 @@ FCM 메시지 예시:
 `PushService.send(PushSend)`는 내부 호출용 async 메서드로 둔다.
 
 1. 대상 활성 사용자와 등록 FID를 조회하고 고정 페이로드를 만든다.
-2. DB 조회 세션을 닫은 뒤 Firebase SDK의 `send_each_async`를 호출한다. 네트워크 응답 동안 DB 트랜잭션을 열어 두지 않는다.
+2. DB 조회 세션을 닫은 뒤 `asyncio.to_thread`로 초기화·자격 증명 조회·인증 토큰 발급/갱신·동기 `send_each` 전체를 worker thread에서 실행한다. 네트워크 응답 동안 DB 트랜잭션을 열어 두지 않는다.
 3. FID별 결과를 집계하고 무효 FID만 별도 트랜잭션에서 삭제한다.
 4. 호출자에게 성공 수·실패 수·건너뜀 사유를 반환하고 로그를 기록한다.
 
@@ -188,6 +188,7 @@ FCM 메시지 예시:
 - async 호출도 완료까지 기다리므로 향후 사건 API에 그대로 `await`하면 응답 지연이 생긴다. 사건 저장 commit 후 응답과 분리해 호출하는 연결 설계는 후속이다.
 - 현재는 호출부 자체를 연결하지 않는다. `NotificationRequest`를 조회해 자동 발송하는 작업도 시작하지 않는다.
 - 프로세스가 발송 도중 종료되면 미발송 건을 자동 복구하지 않으며, 재호출 시 중복 발송될 수 있다.
+- async 호출을 취소해도 이미 실행 중인 worker thread의 발송은 중단을 보장하지 않는다.
 - FCM 접수 성공은 기기 수신·표시·사용자 확인 성공이 아니다.
 - 사건·가족 확인 상태는 이 서비스에서 수정하지 않는다. FCM 실패가 기존 사건을 삭제하거나 롤백하지 않는다.
 
@@ -205,13 +206,13 @@ FCM 메시지 예시:
 - `firebase-admin`은 현재 `pyproject.toml`에 있으므로 새 의존성을 추가하지 않는다.
 - Firebase Admin SDK는 Application Default Credentials를 사용한다.
 - 비 Google 환경에서는 실행 환경의 `GOOGLE_APPLICATION_CREDENTIALS`가 가리키는 외부 자격 증명 파일로 설정할 수 있다. 키 파일을 저장소·이미지에 포함하지 않는다.
-- FCM 클라이언트는 최초 발송 시 이름이 있는 Firebase 앱을 초기화하고 재사용한다. 초기화는 스레드에서 수행하고 SDK의 HTTP timeout은 10초로 설정한다. 전체 배치의 완료 시간이나 기기 전달 시간을 10초로 보장하는 값은 아니다.
+- FCM 클라이언트는 최초 발송 시 이름이 있는 Firebase 앱을 초기화하고 재사용한다. 초기화뿐 아니라 SDK 인증·발송 전체를 스레드에서 수행하고 SDK의 HTTP timeout은 10초로 설정한다. 전체 배치의 완료 시간이나 기기 전달 시간을 10초로 보장하는 값은 아니다.
 - import·FID API 호출·일반 앱 기동에 Firebase 자격 증명을 필수로 요구하지 않는다.
 - 자격 증명 미설정·초기화 실패는 발송 실패로 기록한다. FID를 삭제하거나 발송 성공으로 표시하지 않는다.
 - `.env`는 읽거나 수정하지 않는다. 실행 설정과 컨테이너 마운트 방법은 구현 시 README에 안내한다.
 - Android 팀은 같은 Firebase 프로젝트의 FID를 사용하고 알림 권한·채널·수신 콜백·선택 후 화면 이동을 처리한다.
 - 기존 `AndroidConfig` 방식에서는 백그라운드의 `notification + data`는 시스템 알림으로 표시되고 데이터는 선택 후 앱에 전달된다. 포그라운드 표시에는 앱 처리가 필요하다.
-- 현재 설치된 Admin SDK 7.7.0의 `Message(fid=..., notification=..., data=...)`와 `send_each_async`를 사용한다. `AndroidConfigV2`는 지정하지 않는다.
+- 현재 설치된 Admin SDK 7.7.0의 `Message(fid=..., notification=..., data=...)`와 동기 `send_each`를 사용한다. `send_each_async`도 인증에 동기 I/O를 사용하므로 이벤트 루프에서는 호출하지 않는다. `AndroidConfigV2`는 지정하지 않는다.
 - 서버는 기존 등록 토큰 입력·발송과의 호환 분기를 두지 않는다. 이전 `token`·`previous_token` 요청 키는 422로 거부한다.
 
 ## 7. 영향 파일과 구현 순서
@@ -271,5 +272,7 @@ FID 연결 해제 실패 처리다. PRD에는 사용자가 지시한 FID 전환�
 - 가짜 FCM과 실제 SDK 메시지 객체로 페이로드·부분 실패·사건 보존·통신 중 열린 DB 트랜잭션 없음·발송 중 재등록/계정 전환·500개 분할·정리 DB 오류·자동 연결 없음도 검증했다.
 - FID 전환 후 새 PostgreSQL 18 테스트 컨테이너에서 `149 passed in 21.14s`, 경고 0개를 확인했다. `-W error::DeprecationWarning`으로 deprecated API 사용을 실패 처리해 검증했다.
 - SDK 메시지의 실제 JSON에 `fid`가 있고 `token`이 없는지 확인했다. API의 기존 `token`·`previous_token` 입력 거부도 검증했다.
+- PR #3 검토 반영: `_get_app`만 스레드에서 실행하던 구조를 인증·발송 전체로 확장했다. 초기화와 인증 포함 발송 각각의 대기 중 다른 async 작업이 진행되는 회귀 테스트 2개를 추가했다.
+- 스레드 수정 후 새 PostgreSQL 18 테스트 컨테이너에서 전체 `151 passed in 19.53s`, 경고 0개를 확인했다. Ruff 검사·포맷도 통과했다.
 - `uv run --no-sync ruff check app migrations tests`와 `uv run --no-sync ruff format --check app migrations tests`, `git diff --check`가 통과했다.
 - 실제 Firebase 호출·Android 기기 수신·기존 프로젝트 DB 마이그레이션·배포는 실행하지 않았다. `.env`는 읽거나 수정하지 않았다.

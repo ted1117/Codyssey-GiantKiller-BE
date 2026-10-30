@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from threading import Event, get_ident
 from uuid import uuid4
 
 import pytest
@@ -288,14 +289,14 @@ def test_batches_and_cleanup_failure_preserve_success(
 
 
 @pytest.mark.filterwarnings("error::DeprecationWarning")
-def test_sdk_adapter_uses_async_notification_and_data(
+def test_sdk_adapter_uses_notification_and_data_in_worker(
     runner: asyncio.Runner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """실제 SDK 메시지 객체가 FID·표시 문구·데이터를 함께 전달합니다."""
     app = object()
     monkeypatch.setattr("app.core.fcm._get_app", lambda: app)
 
-    async def send(
+    def send(
         messages: list[messaging.Message], **kwargs: object
     ) -> messaging.BatchResponse:
         assert kwargs["app"] is app
@@ -311,8 +312,56 @@ def test_sdk_adapter_uses_async_notification_and_data(
             [messaging.SendResponse({"name": "id"}, None) for _ in messages]
         )
 
-    monkeypatch.setattr(messaging, "send_each_async", send)
+    monkeypatch.setattr(messaging, "send_each", send)
     result = runner.run(
         FCMClient().send(["one", "two"], "제목", "안내", {"event_id": "event"})
     )
     assert result.success_count == 2
+
+
+@pytest.mark.parametrize("phase", ["initialization", "authenticated_send"])
+def test_sdk_blocking_io_does_not_block_event_loop(
+    phase: str, runner: asyncio.Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """최초 초기화와 인증을 포함한 발송이 대기해도 다른 async 작업은 진행합니다."""
+    entered, release = Event(), Event()
+    loop_thread = get_ident()
+    app = object()
+
+    def block() -> None:
+        assert get_ident() != loop_thread
+        entered.set()
+        assert release.wait(timeout=5)
+
+    def get_app() -> object:
+        assert get_ident() != loop_thread
+        if phase == "initialization":
+            block()
+        return app
+
+    def send(
+        messages: list[messaging.Message], **kwargs: object
+    ) -> messaging.BatchResponse:
+        assert get_ident() != loop_thread
+        assert kwargs["app"] is app
+        if phase == "authenticated_send":
+            block()
+        return messaging.BatchResponse(
+            [messaging.SendResponse({"name": "id"}, None) for _ in messages]
+        )
+
+    monkeypatch.setattr("app.core.fcm._get_app", get_app)
+    monkeypatch.setattr(messaging, "send_each", send)
+
+    async def scenario() -> None:
+        task = asyncio.create_task(FCMClient().send(["fid"], "제목", "안내", {}))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            # worker가 해제 신호를 기다리는 동안 이벤트 루프에서 실행한다.
+            assert not task.done()
+        finally:
+            release.set()
+            result = await asyncio.wait_for(task, timeout=5)
+        assert result.success_count == 1
+
+    runner.run(scenario())

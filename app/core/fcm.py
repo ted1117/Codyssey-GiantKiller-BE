@@ -18,7 +18,7 @@ def _get_app() -> firebase_admin.App:
 
 
 class FCMClient:
-    """필요할 때 ADC로 초기화해 notification과 data를 비동기로 보냅니다."""
+    """ADC 인증과 동기 발송 전체를 worker thread에서 수행합니다."""
 
     async def send(
         self, fids: list[str], title: str, body: str, data: dict[str, str]
@@ -34,7 +34,13 @@ class FCMClient:
         Returns:
             FID별 FCM 접수 성공·실패 결과입니다.
         """
-        app = await asyncio.to_thread(_get_app)
+        return await asyncio.to_thread(self._send, fids, title, body, data)
+
+    def _send(
+        self, fids: list[str], title: str, body: str, data: dict[str, str]
+    ) -> messaging.BatchResponse:
+        # SDK의 최초 자격 증명 조회와 토큰 갱신도 동기 I/O를 사용할 수 있다.
+        app = _get_app()
         messages = [
             messaging.Message(
                 fid=fid,
@@ -43,4 +49,4 @@ class FCMClient:
             )
             for fid in fids
         ]
-        return await messaging.send_each_async(messages, app=app)
+        return messaging.send_each(messages, app=app)

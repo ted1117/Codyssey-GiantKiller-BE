@@ -81,6 +81,7 @@ Last updated: 2026-10-31 KST
 - FID 교체·계정 전환·로그아웃 연결 해제 실패, FCM 접수와 실제 수신의 차이를 명시했다.
 - Android 표시 방식과 SDK 호환성, 실제 기기 발송은 연동 검증이 필요하다.
 - AndroidManifest의 FID 등록 활성화와 `onRegistered(installationId)` 콜백으로 FCM에 등록된 FID를 업로드하는 계약을 README·SPEC에 명시했다. 기존 등록 토큰을 FID로 이름만 바꿔 사용하지 않는다.
+- PR #3 검토 반영: Admin SDK 7.7.0의 동기 인증 I/O를 확인하고 초기화·인증·`send_each` 전체를 worker thread로 옮겼다. 초기화와 인증 포함 발송 대기 중 이벤트 루프 진행을 검사하는 회귀 테스트 2개를 추가했다.
 - FID DB → API → 내부 발송·자동 검증을 완료했다. 기존 프로젝트 DB에는 적용하지 않았다.
 
 ## 후속 설계: PRD-003 가족 확인
@@ -167,8 +168,8 @@ docker compose --env-file /dev/null config --quiet
 
 ## Test Status
 
-- Last passing: PRD-004 독립 서버 기능 기준 임시 PostgreSQL 18 전체 149개와 Ruff 검사·포맷 통과
-- 이번 실행: `TEST_DATABASE_URL`을 새 FID 전환 테스트 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-prd004-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning`, 149 passed in 21.14s, 경고 0개
+- Last passing: PR #3 발송 worker thread 수정 기준 임시 PostgreSQL 18 전체 151개와 Ruff 검사·포맷 통과
+- 이번 실행: `TEST_DATABASE_URL`을 새 스레드 수정 테스트 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-prd004-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning`, 151 passed in 19.53s, 경고 0개
 - SDK 메시지 직렬화의 `fid` 키와 `token` 키 부재, 레거시 `token`·`previous_token` 요청 거부를 검증했다.
 - 이전 PRD-001 검증: 전체 49개, Docker 빌드·마이그레이션·앱 실행, Compose 설정. 이번 DB 단계에서 이미지 빌드는 재실행하지 않았다.
 - Failing: 없음
