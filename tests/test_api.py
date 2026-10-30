@@ -552,6 +552,8 @@ def test_configured_invitation_link_and_openapi(
             f"{PREFIX}/families/{{family_id}}/invitations/{{invitation_id}}",
             f"{PREFIX}/invitations/{{token}}",
             f"{PREFIX}/invitations/{{token}}/accept",
+            f"{PREFIX}/verify/respond",
+            f"{PREFIX}/verify/{{verification_id}}",
         }
         assert (await client.get("/health")).status_code == 200
 

@@ -1,6 +1,7 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exception_handlers import http_exception_handler
@@ -9,20 +10,42 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException
 
 from app.api.router import router
-from app.core.database import engine
+from app.core.database import engine, session_factory
 from app.core.exceptions import ServiceError
+from app.services.verification import VerificationService
 
 logger = logging.getLogger(__name__)
 
 
+async def expire_verifications() -> None:
+    """별도 세션으로 만료 요청을 처리하고 30초 후 반복합니다."""
+    while True:
+        try:
+            async with session_factory() as session:
+                await VerificationService(session).expire_due()
+        except Exception as error:
+            logger.error(
+                "verification_expiration_failed error_type=%s", type(error).__name__
+            )
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """기동 시 DB 연결을 확인하고 종료 시 연결 풀을 해제합니다."""
+    """DB 연결과 만료 작업을 시작하고 작업 종료 후 연결 풀을 해제합니다."""
+    expiration_task = None
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
+        expiration_task = asyncio.create_task(
+            expire_verifications(), name="verification-expiration"
+        )
         yield
     finally:
+        if expiration_task is not None:
+            expiration_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await expiration_task
         await engine.dispose()
 
 

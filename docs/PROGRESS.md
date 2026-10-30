@@ -1,17 +1,18 @@
-# Progress: PRD-001 회원·가족·초대
+# Progress: 회원·가족·초대 및 PRD-003 가족 확인
 
-Last updated: 2026-10-30 18:49 KST
+Last updated: 2026-10-30 KST
 
 ## Goal
 
 - FastAPI Users 계정과 가족·초대를 연결한다.
 - 이번 브랜치의 DB 모델·레포지토리·마이그레이션, API 스키마, 인증·서비스·엔드포인트를 완료했다.
+- PRD-003 가족 확인 서버 범위는 구현 1~3단계인 DB 기반·API·주기 만료 작업까지 완료했다.
 
 ## Current Status
 
-- Status: Ready for review (3단계)
-- Current focus: 회원·가족·초대 전체 구현 검토
-- Branch: `feature/user`
+- Status: Ready for review (가족 확인 서버 구현 1~3단계)
+- Current focus: 자녀 사칭 확인 서버 범위 검토. 실제 AI·FCM 연결은 후속이며 앱 설치 연관 분석은 보류
+- Branch: `feature/child-verification`
 - Related issue/PR: 없음
 
 ## Decisions
@@ -20,11 +21,12 @@ Last updated: 2026-10-30 18:49 KST
 - 2026-10-30: Python은 기존 프로젝트 설정인 3.14를 유지했다.
 - 2026-10-30: FastAPI Users 어댑터와 호환되는 SQLAlchemy 2.0.55를 사용한다.
 - 2026-10-30: 가족·멤버·초대 레포지토리는 DB 접근과 flush만 담당한다. 서비스에서 정책과 트랜잭션을 조합한다.
-- 2026-10-30: FCM·기기 등록과 사칭 확인 응답 정책은 이번 작업에서 제외한다.
+- 2026-10-30: PRD-001 구현에서는 FCM·기기 등록과 사칭 확인 응답 정책을 제외했다. 가족 확인은 후속 PRD-003에서 진행한다.
 - 2026-10-30: 인증 기본값은 Bearer JWT·3600초다. 갱신·서버 측 폐기·로그아웃 API는 추가하지 않는다.
 - 2026-10-30: 가족별 역할 겸용은 허용하고 계정 전체의 역할 제한은 두지 않는다.
 - 2026-10-30: 초대 재취소는 204, 사용 완료는 409, 만료·취소 초대 수락은 410으로 처리한다.
 - 2026-10-30: 미설정 초대 주소는 API 미리보기 URL로 반환하고, 앱·웹 링크 prefix는 환경변수로 설정한다.
+- 2026-10-30: 사용자 지시에 따라 PRD-003은 자녀 사칭 확인·대응으로 한정한다. 앱 설치 연관 분석은 이번 완료 조건에서 제외하고 보류한다.
 
 ## Completed
 
@@ -50,19 +52,55 @@ Last updated: 2026-10-30 18:49 KST
 - [x] PostgreSQL 18에서 전체 49개 테스트 통과
 - [x] Docker 이미지 빌드, 이미지 내 마이그레이션, 앱 시작·가입·로그인·가족·초대 실행
 - [x] Compose 설정 검증과 README 실행·설정 안내
+- [x] 최소 사건·확인 요청·자녀별 응답·알림 요청 모델과 저장소
+- [x] `0002_verification` 마이그레이션과 DB 제약·집계·행 잠금·롤백 검증
+- [x] 신규 저장소 테스트 26개, 임시 PostgreSQL 18에서 전체 75개 통과 및 Ruff 통과
+- [x] 가족 확인 요청 생성·권한·응답 집계·10분 만료와 상태·알림 요청의 원자적 저장
+- [x] 응답 POST·상태 조회 GET과 공통 스키마·오류 응답
+- [x] 신규 스키마 17개·서비스 및 API 27개 테스트, 전체 119개와 Ruff 통과
+- [x] 기동 직후·30초 간격 자동 만료와 종료 시 작업·DB 연결 정리
+- [x] 신규 주기 작업·lifespan 테스트 8개, 임시 PostgreSQL 18에서 전체 127개 및 Ruff 통과
 
 ## In Progress
 
-- 없음. 3단계 구현·검증 완료.
+- 없음. 합의한 가족 확인 서버 범위의 구현 1~3단계를 완료했다.
+
+## 후속 설계: PRD-003 가족 확인
+
+- PRD-002보다 가족 확인 기능을 먼저 진행하기로 했다.
+- `docs/SPEC/SPEC-003.md`에 설계와 구현 1~3단계 결과를 기록했다.
+- 응답 대상은 모든 자녀다. 한 명이라도 `SENT`이면 발송 확인, 전원이 `NOT_SENT`이면 발송 부인으로 확정한다.
+- 응답 기한은 요청 생성 후 10분이다. 일부 응답·무응답으로 기한이 지나면 확인 불가로 종료한다.
+- 대기 중 부모에게 위험 행동 보류 안내를 요청한다. 발송 확인·발송 부인·만료를 안전 보증이나 사칭 확정으로 표현하지 않는다.
+- 대상 자녀가 0명이면 즉시 `EXPIRED`로 종료하고 확인 불가로 안내한다. PRD-003과 SPEC-003에 반영했다.
+- 해커톤에서는 최소 기능의 완전한 동작을 우선한다. 자녀 탈퇴·계정 비활성화 대응은 제외하고 기존 인증·가족 권한 검사를 재사용한다.
+- 앱 설치와 통화 지시 연관 분석, 실제 AI·FCM·Android 연결은 후속 범위다.
+- 설계 1단계: 응답 POST·상태 조회 GET과 내부 요청 생성 서비스로 정했다. 시연용 생성 API는 추가하지 않는다.
+- 설계 2단계: 요청은 확인 요청 ID·응답 값, 공통 결과는 ID·사건 ID·상태·만료 시각·대상 수·응답 수·내 응답으로 정했다.
+- 설계 3단계: SPEC-003에 `VerificationRequest`·`VerificationResponse` 두 모델의 필드·제약·집계·동시성 설계안을 작성했다. 대상 자녀는 미응답 상태부터 저장하고 집계 수는 조회로 계산한다.
+- 설계 4단계 초안: 저장된 사건 ID로 확인 요청을 생성하고, 결과별 알림 요청을 DB에 함께 기록하는 연결 계약을 정리했다. 실제 FCM 발송은 후속이다.
+- 사용자 승인에 따라 최소 `SecurityEvent` 모델을 이번 설계에 포함했다. 가족·부모·유형·분류·위험 수준·요약·상태·발생 및 저장 시각을 설계하고 확인 요청의 사건 외래 키를 연결했다.
+- 사건 공개 API·분석 상태·통화 지시·완료 전이는 후속이다.
+- 설계 5단계: 기존 오류 형식에 맞춰 401·403·404·409·410·422를 정리했다. 타 가족은 기존 정책과 같은 403이다.
+- 만료는 lifespan의 asyncio 작업으로 기동 직후·30초 간격 처리하고 API에서도 검사하기로 했다. 응답 기한은 10분 그대로이며 별도 의존성을 추가하지 않는다.
+- 결과별 부모·자녀 안내 문구 초안을 작성했다.
+- SPEC-003에 영향 파일과 구현 계획을 기록했다. 구현 1단계는 DB·레포지토리·마이그레이션, 2단계는 스키마·서비스·API, 3단계는 주기 작업·앱 연결·전체 검증이다.
+- 사용자 승인에 따라 구현 1단계 DB 기반, 2단계 스키마·서비스·API, 3단계 30초 주기 작업과 lifespan 연결을 완료했다.
+- 사건 생성 재호출의 최신 상태 반환, 중복·동시 응답, 기한 정각·잠금 대기 중 만료, 알림 실패 롤백과 권한별 API 응답을 검증했다.
+- 실제 lifespan에서 지난 요청 복구·반복 실행·DB 오류 후 재실행·행 잠금 대기 중 종료를 검증했다. API·주기 작업과 여러 만료 작업의 경합에서도 확정 결과와 알림이 중복되지 않는다.
+- 기존 프로젝트 DB·컨테이너에는 적용하지 않았다. 새 테스트 전용 PostgreSQL 18에서 검증했다.
 
 ## Next Steps
 
-1. 구현 코드 검토
-2. 실제 실행 환경에 AUTH_SECRET을 설정하고, 대상 DB 확인 후 마이그레이션 적용
-3. 클라이언트의 초대 링크 연결 화면과 앱·웹 주소 설정
+1. 가족 확인 서버 구현 1~3단계 코드 검토
+2. 자녀 사칭 확인에 필요한 후속 PRD의 실제 AI 입력·FCM 발송 연결. 앱 설치 연관 분석은 진행하지 않는다.
 
 ## Changed Files
 
+- 이번 PRD-003 단계: `app/models/event.py`, `verification.py`, `notification.py`, `__init__.py`; `app/repositories/event.py`, `verification.py`, `notification.py`; `migrations/versions/0002_verification.py`; `tests/test_verification_storage.py`; 관련 PRD·SPEC·진행 문서
+- PRD-003 구현 2단계: `app/schemas/verification.py`, `app/services/verification.py`, `app/api/v1/verify.py`, API dependency·router, 사건·가족·확인 저장소의 필요한 조회 보완, 신규 스키마·서비스 테스트, 기존 OpenAPI 테스트
+- PRD-003 구현 3단계: `app/main.py`, `app/services/verification.py`, `tests/conftest.py`, `tests/test_verification_worker.py`, 관련 진행·요구사항·설계 문서
+- 아래는 이전 PRD-001 구현의 파일 목록이다.
 - `pyproject.toml`, `uv.lock`: FastAPI Users 의존성 추가와 SQLAlchemy 2.0 호환 범위
 - `app/models/`: DB 연결과 분리된 Base 및 모델 4개
 - `app/core/database.py`: 기존 Base import 경로를 유지하면서 공통 모델 Base 재사용
@@ -109,10 +147,13 @@ docker compose --env-file /dev/null config --quiet
 
 ## Test Status
 
-- Last passing: PostgreSQL 18 기준 전체 49개, Ruff, Docker 빌드·마이그레이션·앱 실행, Compose 설정
+- Last passing: 가족 확인 서버 구현 3단계 기준 임시 PostgreSQL 18 전체 127개와 Ruff 검사·포맷 통과
+- 이번 실행: `TEST_DATABASE_URL`을 새 테스트 컨테이너로 지정해 `uv run --no-sync pytest -q`, 127 passed in 19.00s
+- 이전 PRD-001 검증: 전체 49개, Docker 빌드·마이그레이션·앱 실행, Compose 설정. 이번 DB 단계에서 이미지 빌드는 재실행하지 않았다.
 - Failing: 없음
 - Not run: 기존 프로젝트 DB에 대한 마이그레이션 적용, 실제 앱·웹의 초대 링크 연결
 - DB 테스트는 `TEST_DATABASE_URL`이 없으면 skip한다. 각 테스트는 고유 스키마를 만들고 제거한다.
+- PRD-003의 조회·응답 시 만료와 응답 정책·권한·API, API 호출 없는 자동 만료·실제 lifespan을 검증했다. 실제 AI·FCM·Android·앱 설치 연관 분석은 후속이다.
 
 ## Risks / Open Questions
 
