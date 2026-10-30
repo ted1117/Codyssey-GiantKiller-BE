@@ -4,7 +4,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.event import SecurityEvent
+from app.models.event import AnalysisStatus, EventStatus, SecurityEvent
+from app.schemas.event import CallAnalysisResult
 
 
 class SecurityEventRepository:
@@ -49,3 +50,42 @@ class SecurityEventRepository:
                 populate_existing=True
             )
         return await self.session.scalar(statement)
+
+    async def create_call(
+        self, family_id: UUID, parent_member_id: UUID, occurred_at: datetime
+    ) -> SecurityEvent:
+        """분석 전 통화 사건을 저장합니다."""
+        event = SecurityEvent(
+            family_id=family_id,
+            parent_member_id=parent_member_id,
+            event_type="CALL",
+            occurred_at=occurred_at,
+            analysis_status=AnalysisStatus.PENDING,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event
+
+    async def start_analysis(self, event: SecurityEvent) -> None:
+        """분석 시작을 저장합니다."""
+        event.analysis_status = AnalysisStatus.PROCESSING
+        await self.session.flush()
+
+    async def complete_analysis(
+        self, event: SecurityEvent, result: CallAnalysisResult, status: EventStatus
+    ) -> None:
+        """검증된 결과와 판정값을 저장합니다."""
+        event.classification = result.classification
+        event.requires_attention = result.requires_attention
+        event.risk_level = result.risk_level
+        event.summary = result.summary
+        event.analysis_status = AnalysisStatus.COMPLETED
+        event.analysis_error_code = None
+        event.status = status
+        await self.session.flush()
+
+    async def fail_analysis(self, event: SecurityEvent, error_code: str) -> None:
+        """고정 분석 실패 코드를 저장합니다."""
+        event.analysis_status = AnalysisStatus.FAILED
+        event.analysis_error_code = error_code
+        await self.session.flush()
