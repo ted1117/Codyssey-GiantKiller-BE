@@ -76,6 +76,12 @@ class FamilyMemberRepository:
         )
         return await self.session.scalar(statement)
 
+    async def get_by_id(self, member_id: UUID) -> FamilyMember | None:
+        """멤버 ID로 사건 당사자의 소속·역할과 사용자 ID를 조회합니다."""
+        return await self.session.scalar(
+            select(FamilyMember).where(FamilyMember.id == member_id)
+        )
+
     async def list_by_family(self, family_id: UUID) -> list[FamilyMember]:
         """가족 멤버와 이름을 추가 지연 조회 없이 읽을 수 있도록 조회합니다."""
         statement = (

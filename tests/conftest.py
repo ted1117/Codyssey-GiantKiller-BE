@@ -10,7 +10,12 @@ from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import Connection, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,7 +81,7 @@ def session(engine: AsyncEngine, runner: asyncio.Runner) -> Iterator[AsyncSessio
 def application(
     engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[FastAPI]:
-    """실제 앱의 설정과 요청별 세션만 테스트 DB로 교체합니다."""
+    """실제 앱의 설정·요청 세션·lifespan을 테스트 DB로 교체합니다."""
     from app.core.config import Settings, get_settings
 
     # 개발용 .env를 읽지 않고 테스트 전용 값으로 앱을 초기화한다.
@@ -85,8 +90,13 @@ def application(
     monkeypatch.setenv("AUTH_SECRET", "stage3-test-secret-" * 3)
     get_settings.cache_clear()
 
+    from app import main
     from app.core.database import get_session
     from app.main import app
+
+    test_sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(main, "engine", engine)
+    monkeypatch.setattr(main, "session_factory", test_sessions)
 
     settings = Settings(
         _env_file=None,
@@ -95,7 +105,7 @@ def application(
     )
 
     async def get_test_session() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
+        async with test_sessions() as session:
             yield session
 
     app.dependency_overrides[get_session] = get_test_session
