@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.call_instruction import CallInstruction
 from app.models.event import SecurityEvent
 from app.models.family import Family, FamilyMember, FamilyRole
 from app.models.invitation import FamilyInvitation
@@ -14,6 +15,7 @@ from app.models.verification import (
 
 __all__ = [
     "Base",
+    "CallInstruction",
     "Family",
     "FamilyInvitation",
     "FamilyMember",

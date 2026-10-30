@@ -10,13 +10,15 @@ Last updated: 2026-10-31 KST
 
 ## Current Status
 
-- Status: PRD-004 독립 FID 관리·발송 서비스 구현 및 자동 테스트 완료, 실제 기기 연동 미검증
-- Current focus: 독립 FCM 기능 검토. 가족 확인 호출 연결·실제 AI 연결·앱 설치 연관 분석은 후속
-- Branch: `feature/push-notifications` (2026-10-31 전환 확인)
+- Status: PRD-005 최소 통화 사건 내부 서비스·자녀 알림 연결 구현 및 자동 검증 완료, 실제 AI·기기 연동 미검증
+- Current focus: PRD-005 통화 사건 최소 구현 검토. 조회·실제 AI 연결·앱 설치 연관 분석은 후속
+- Branch: `feature/call-events` (2026-10-31 커밋·PR 준비 시 확인)
 - Related issue/PR: 없음
 
 ## Decisions
 
+- 2026-10-31: PRD-005는 정상 접수한 모든 통화를 사건으로 저장하고, 분석 결과가 위험·의심인 사건만 자녀에게 알린다. 정상 결과는 대응 불필요로 두고 분석 실패를 안전으로 취급하지 않는다.
+- 2026-10-31: 해커톤 최소 범위는 사건 생성·분석 상태/결과 저장·자녀 알림이다. 조회·공개 필드·대응 변경 API는 후속이며 멱등성 키·재분석·자동 재시도는 TODO로 둔다. `docs/SPEC/SPEC-005.md`에 설계와 영향 파일을 작성하고 이후 사용자 구현 승인에 따라 최소 구현을 완료했다.
 - 2026-10-31: 사용자 지시에 따라 FCM 등록 토큰 대신 FID로 전환했다. API는 `/users/me/push-registrations`, 입력은 `fid`·`previous_fid`, DB는 `PushRegistration.fid`, 발송은 `Message(fid=...)`를 사용한다.
 - 2026-10-31: PRD-004는 가족 확인 서비스와 연결하지 않고 FID 관리·내부 FCM 발송 기능을 독립적으로 설계한다.
 - 2026-10-31: 사용자당 여러 앱 FID를 지원하고 모두 발송한다. 별도 기기 등록·기기 정보 관리 없이 로그인 사용자와 FCM에 등록된 FID만 연결한다.
@@ -112,9 +114,9 @@ Last updated: 2026-10-31 KST
 
 ## Next Steps
 
-1. SPEC-004 독립 FID 관리·FCM 발송 구현 검토
-2. 실제 Firebase 테스트 기기 발송·Android 수신 검증
-3. 가족 확인·AI 분석 호출 연결은 별도 후속. 앱 설치 연관 분석은 진행하지 않는다.
+1. SPEC-005 최소 통화 사건 구현 검토
+2. PRD-002 연결 시 실제 AI 결과 매핑·접수 대상 가족 계약 확정
+3. 실제 AI 계약·Firebase 테스트 기기 발송·Android 수신 검증은 연결 단계에서 진행. 앱 설치 연관 분석은 진행하지 않는다.
 
 ## Changed Files
 
@@ -187,3 +189,14 @@ docker compose --env-file /dev/null config --quiet
 - JWT 갱신·즉시 폐기는 지원하지 않으며 만료 후 재로그인한다.
 - 앱·웹 초대 화면과 프록시 로그의 토큰 처리는 배포·클라이언트 작업이다.
 - 테스트는 임시 PostgreSQL 컨테이너만 사용했으며 기존 프로젝트 DB·컨테이너에는 적용하지 않았다.
+
+
+## PRD-005 최소 통화 사건 구현 (2026-10-31)
+
+- 완료: 모든 접수 통화의 사건 저장, 분석 상태·판정값·결과·지시 저장, 정상 결과의 대응 불필요 처리, 위험·의심 건만 commit 후 자녀 알림.
+- 변경: 사건 모델·저장소, 신규 지시 모델·저장소, 내부 결과 스키마·사건 서비스, 모델 export, `0004_call_events` 마이그레이션, `tests/test_events.py`, SPEC-005.
+- 검증: 신규 14개 포함 임시 PostgreSQL 18 전체 168개 통과(20.28초), 경고 0개. Ruff 검사·포맷과 diff 공백 검사 통과.
+- 명령: `TEST_DATABASE_URL`을 분리된 테스트 DB로 지정해 `uv --cache-dir /tmp/giantkiller-spec005-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning` 실행.
+- 검증한 동작: 정상 알림 제외·가족별 수신자·다른 세션에서 commit 확인 후 발송·저장 롤백·발송 예외 후 나머지 수신자 처리·자녀 없음·권한·상태 전이·입력 검증·NULL 분류 downgrade 중단.
+- 미포함: 조회·대응 변경 API, 실제 AI·Android 업로드 연결, 멱등성·재분석·자동 재시도. 기존 프로젝트 DB에는 마이그레이션을 적용하지 않았다.
+- 제한: 동일 통화 재전송 시 중복 사건·알림 가능, 종료 시 분석 정체·발송 누락 가능. 이번 최소 구현에서는 복구하지 않는다.
