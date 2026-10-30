@@ -147,6 +147,42 @@ def test_registration_is_atomic(
     runner.run(scenario())
 
 
+@pytest.mark.parametrize(
+    ("method", "field"),
+    [("PUT", "fid"), ("PUT", "previous_fid"), ("DELETE", "fid")],
+)
+def test_nul_fid_is_rejected_without_writes_or_disclosure(
+    method: str,
+    field: str,
+    client: AsyncClient,
+    session: AsyncSession,
+    runner: asyncio.Runner,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """NUL을 두 공통 FID 필드에서 거부하고 DB와 오류 응답에 원문을 남기지 않습니다."""
+
+    async def scenario() -> None:
+        user = await add_user(session)
+        user_id = user.id
+        repository = PushRegistrationRepository(session)
+        await repository.upsert(user_id, "original-fid")
+        await session.commit()
+        body = {"fid": "new-fid", field: "private\x00fid"}
+        response = await client.request(
+            method, PATH, headers=bearer(user_id), json=body
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert len(detail) == 1 and detail[0]["loc"] == ["body", field]
+        assert "NUL" in detail[0]["msg"] and "input" not in detail[0]
+        assert "private" not in response.text and "private" not in caplog.text
+        assert [r.fid for r in await repository.list_by_user(user_id)] == [
+            "original-fid"
+        ]
+
+    runner.run(scenario())
+
+
 def test_concurrent_registration_and_stale_cleanup(
     engine: AsyncEngine, session: AsyncSession, runner: asyncio.Runner
 ) -> None:

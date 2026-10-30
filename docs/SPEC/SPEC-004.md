@@ -72,6 +72,7 @@ FID 원문은 FCM 발송에 필요하므로 DB에 저장하되 API 응답·URL·
 ```
 
 - `fid`는 필수이며 빈 문자열·공백만 있는 값을 거부한다. FID 원문은 임의로 변환하지 않는다.
+- `fid`·`previous_fid`의 공통 검증에서 PostgreSQL TEXT에 저장할 수 없는 U+0000(NUL)을 거부한다. DB 접근 전에 원문 없는 422로 응답한다.
 - 입력은 UTF-8 기준 최대 2048바이트다. 이는 FID UNIQUE 인덱스에 과도한 입력을 저장하지 않기 위한 서버 제한이며 FCM의 공식 FID 길이 규격을 의미하지 않는다. `previous_fid`에도 같은 제한을 적용한다.
 - `previous_fid`는 선택이다. 앱이 FID 변경 전 값을 알고 있으면 함께 보낸다.
 - 같은 사용자·FID를 다시 등록하면 중복 행 없이 등록 시각만 갱신한다.
@@ -274,5 +275,6 @@ FID 연결 해제 실패 처리다. PRD에는 사용자가 지시한 FID 전환�
 - SDK 메시지의 실제 JSON에 `fid`가 있고 `token`이 없는지 확인했다. API의 기존 `token`·`previous_token` 입력 거부도 검증했다.
 - PR #3 검토 반영: `_get_app`만 스레드에서 실행하던 구조를 인증·발송 전체로 확장했다. 초기화와 인증 포함 발송 각각의 대기 중 다른 async 작업이 진행되는 회귀 테스트 2개를 추가했다.
 - 스레드 수정 후 새 PostgreSQL 18 테스트 컨테이너에서 전체 `151 passed in 19.53s`, 경고 0개를 확인했다. Ruff 검사·포맷도 통과했다.
+- NUL 검증 수정 후 PUT의 `fid`·`previous_fid`와 DELETE의 `fid`가 원문 없는 422를 반환하고 기존 데이터를 보존하는 회귀 테스트 3개를 추가했다. 새 PostgreSQL 18에서 전체 `154 passed in 18.86s`, 경고 0개와 Ruff 검사·포맷 통과를 확인했다.
 - `uv run --no-sync ruff check app migrations tests`와 `uv run --no-sync ruff format --check app migrations tests`, `git diff --check`가 통과했다.
 - 실제 Firebase 호출·Android 기기 수신·기존 프로젝트 DB 마이그레이션·배포는 실행하지 않았다. `.env`는 읽거나 수정하지 않았다.

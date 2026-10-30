@@ -6,9 +6,11 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 
 
 def validate_fid(value: str) -> str:
-    """FID를 변환하지 않고 공백뿐인 입력을 거부합니다."""
+    """FID 원문을 보존하고 빈 값·NUL·길이 초과를 거부합니다."""
     if not value.strip():
         raise ValueError("FCM FID는 비어 있을 수 없습니다")
+    if "\x00" in value:
+        raise ValueError("FCM FID에는 NUL 문자를 포함할 수 없습니다")
     if len(value.encode("utf-8")) > 2048:
         raise ValueError("FCM FID는 2048바이트 이하여야 합니다")
     return value

@@ -92,7 +92,8 @@ AndroidManifest에 다음 설정이 필요합니다.
 콜백의 FID를 사용합니다. FCM 등록 없이 Firebase Installations에서 ID만 조회한 상태와 구분합니다.
 기존 FCM 등록 토큰을 `fid`에 넣어서는 안 됩니다. `token`·`previous_token` 요청 키는 지원하지 않습니다.
 [Android 공식 FID 등록 안내](https://firebase.google.com/docs/cloud-messaging/android/get-started#access_the_firebase_installation_id)를 참고합니다.
-입력은 원문을 보존하며 빈 값·공백뿐인 값·UTF-8 기준 2048바이트 초과 FID는 거부합니다.
+입력은 원문을 보존하며 빈 값·공백뿐인 값·NUL(U+0000)·UTF-8 기준 2048바이트 초과 FID는 거부합니다.
+`previous_fid`에도 같은 검증을 적용하며 오류 응답에 입력 원문을 포함하지 않습니다.
 
 로그아웃·계정 전환 전에는 `DELETE /api/v1/users/me/push-registrations`에
 `{"fid": "current-fcm-fid"}`을 보내 연결을 해제합니다.
