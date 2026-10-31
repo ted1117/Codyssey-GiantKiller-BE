@@ -5,6 +5,7 @@ from fastapi import Depends
 from app.core.ai import AIClient
 from app.core.database import SessionDep, session_factory
 from app.services.analysis import AnalysisService
+from app.services.app_install import AppInstallService
 from app.services.event_query import EventQueryService
 from app.services.event_status import EventStatusService
 from app.services.family import FamilyService
@@ -76,3 +77,13 @@ def get_event_status_service(session: SessionDep) -> EventStatusService:
 
 
 EventStatusServiceDep = Annotated[EventStatusService, Depends(get_event_status_service)]
+
+
+def get_app_install_service(
+    session: SessionDep, push: PushServiceDep
+) -> AppInstallService:
+    """앱 설치 서비스에 요청 세션과 알림 서비스를 주입합니다."""
+    return AppInstallService(session, push)
+
+
+AppInstallServiceDep = Annotated[AppInstallService, Depends(get_app_install_service)]

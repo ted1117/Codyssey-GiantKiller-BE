@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -60,6 +60,7 @@ class SecurityEventRepository:
     def _visible() -> ColumnElement[bool]:
         # 사칭 문자는 기존 저장 경로에서 분석 상태·판정값을 채우지 않는다.
         # 그 외 문자는 주의가 필요한 판정(requires_attention)일 때만 공개한다.
+        # 앱 설치는 위험으로 저장된(requires_attention) 사건만 공개한다.
         return or_(
             and_(
                 SecurityEvent.event_type == "CALL",
@@ -74,7 +75,27 @@ class SecurityEventRepository:
                 SecurityEvent.event_type == "ALERT",
                 SecurityEvent.requires_attention.is_(True),
             ),
+            and_(
+                SecurityEvent.event_type == "APP_INSTALL",
+                SecurityEvent.requires_attention.is_(True),
+            ),
         )
+
+    async def has_attention_call(
+        self, family_id: UUID, since: datetime, until: datetime
+    ) -> bool:
+        """기간 안에 주의가 필요한 완료 통화가 있는지 확인합니다."""
+        statement = select(
+            exists().where(
+                SecurityEvent.family_id == family_id,
+                SecurityEvent.event_type == "CALL",
+                SecurityEvent.analysis_status == AnalysisStatus.COMPLETED,
+                SecurityEvent.requires_attention.is_(True),
+                SecurityEvent.occurred_at >= since,
+                SecurityEvent.occurred_at <= until,
+            )
+        )
+        return bool(await self.session.scalar(statement))
 
     async def list_visible(
         self, family_id: UUID, limit: int, offset: int
