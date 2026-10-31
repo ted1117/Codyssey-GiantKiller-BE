@@ -7,8 +7,10 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.1",
     "asyncpg>=0.32.0",
+    "av>=15,<17",
     "fastapi-users[sqlalchemy]>=15.0.5,<16",
     "fastapi[standard]>=0.162.0",
+    "faster-whisper>=1.2.1",
     "firebase-admin>=7.7.0",
     "pydantic-settings>=2.16.2",
     "pytest>=9.2.0",

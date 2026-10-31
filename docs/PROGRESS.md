@@ -10,12 +10,14 @@ Last updated: 2026-10-31 KST
 
 ## Current Status
 
-- Status: PRD-002 1차 및 PRD-005 자녀 사건 조회·대응 변경 구현·자동 검증 완료. 실제 AI·입력 제한·기기 연동은 미완료
+- Status: PRD-002 실제 AI 연결(게이트웨이 LLM·faster-whisper STT) 구현·자동 검증 완료(2026-10-31, 실서비스 호출 미검증). PRD-002 1차 및 PRD-005 자녀 사건 조회·대응 변경 구현·자동 검증 완료. 실제 AI·입력 제한·기기 연동은 미완료
 - Current focus: 위험 문자 사건화·자녀 공개 완료, 독립 PostgreSQL 전체 219개 테스트 통과(위험 앱 설치 감지 `INSTALL_WARNING` 포함). 가족 확인 알림 FCM 발송 연결 완료. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
 - Branch: `feature/child-event-queries` (PRD-002 1차·자녀 조회·대응 변경 포함)
 - Related issue/PR: 없음
 
 ## Decisions
+
+- 2026-10-31: PRD-002 실제 AI 연결을 `feature/ai-integration`에서 구현했다. 백엔드가 Codyssey 게이트웨이(`gpt-5.4`)를 직접 호출하고 3분류(`CHILD_IMPERSONATION`/`FRAUD`/`NORMAL`) 판정을 매핑한다(주의 필요는 confidence 0.8 이상 HIGH, 아니면 MEDIUM). 자녀 사칭 문자는 가족 확인 흐름에 도달하며 분류 정확도는 실제 샘플로 확인해야 한다. 통화는 faster-whisper `small`(CPU·int8)을 백엔드 안에서 실행하며 빈 전사본은 `AI_REQUEST_FAILED`다. 녹음 10 MiB 초과는 413 `AUDIO_TOO_LARGE`, 형식 검사는 미적용. `AI_API_KEY` 미설정이면 503을 유지한다. 변경 파일: `app/core/ai.py`, `app/core/config.py`, `app/api/dependencies.py`, `app/main.py`, `app/services/analysis.py`, `.env.example`, `compose.yaml`, `Dockerfile`, `pyproject.toml`, `uv.lock`, `tests/test_ai.py`, SPEC-002·PRD-002. 독립 PostgreSQL 18 전체 239개 통과. 실제 게이트웨이·Whisper 모델 로딩은 배포 환경에서 확인해야 한다.
 
 - 2026-10-31: 사용자 선택으로 위험 앱 설치(PRD-006, 흐름 D)를 설치 정보만으로 판정하고(원격제어 패키지 접두어 3개 또는 출처 불명), 최근 24시간 의심 통화 여부(`related_call`)는 보조 정보로만 표시한다. 해커톤 시연용 최소 구현이다. 위험 설치만 `APP_INSTALL` 사건으로 저장·자녀에게 공개하고 자녀에게 `INSTALL_WARNING`을 보낸다(부모 제외, 실패는 사건·응답 유지). 패키지명은 저장·로그하지 않는다. 중복 수신 방지·통화 지시 대조·Android 연동은 후속이다.
 - 2026-10-31: 사용자 승인으로 사칭 이외 위험 문자(`requires_attention=true`)를 `ALERT` 사건(`COMPLETED`·`OPEN`)으로 저장하고 commit 후 가족 자녀에게 `RISK_WARNING`을 발송한다(PRD-002 5.2, PRD-005 6.0.3). 부모에게는 보내지 않으며 발송 실패는 사건·응답을 바꾸지 않는다. `requires_attention=false`는 결과만 반환한다. 자녀 공개 조건에 `ALERT`+`requires_attention` true 분기를 추가했고 사칭 문자 저장 경로는 변경하지 않았다.

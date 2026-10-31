@@ -10,6 +10,8 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException
 
 from app.api.router import router
+from app.core.ai import load_stt_model
+from app.core.config import get_settings
 from app.core.database import engine, session_factory
 from app.core.exceptions import ServiceError
 from app.services.push import PushService
@@ -33,18 +35,33 @@ async def expire_verifications() -> None:
         await asyncio.sleep(30)
 
 
+async def warm_up_stt(name: str) -> None:
+    """음성 인식 모델을 미리 불러오고 실패해도 서버는 유지합니다."""
+    try:
+        await asyncio.to_thread(load_stt_model, name)
+    except Exception as error:
+        logger.error("stt_warmup_failed error_type=%s", type(error).__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """DB 연결과 만료 작업을 시작하고 작업 종료 후 연결 풀을 해제합니다."""
-    expiration_task = None
+    expiration_task = warmup_task = None
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         expiration_task = asyncio.create_task(
             expire_verifications(), name="verification-expiration"
         )
+        settings = get_settings()
+        if settings.ai_api_key:
+            warmup_task = asyncio.create_task(
+                warm_up_stt(settings.stt_model), name="stt-warmup"
+            )
         yield
     finally:
+        if warmup_task is not None:
+            warmup_task.cancel()
         if expiration_task is not None:
             expiration_task.cancel()
             with suppress(asyncio.CancelledError):
