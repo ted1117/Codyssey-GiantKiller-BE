@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-31 KST
 
+## Ncloud 배포 준비 (2026-10-31)
+
+- 브랜치: `chore/ncloud-deploy`. 사용자 요청으로 Ncloud 단일 서버·기존 API/PostgreSQL Compose 배포를 준비한다.
+- 서버가 사설 IP(VPN 전용)라 GitHub Actions SSH 배포는 불가능하다. 서버가 cron으로 매분 `origin/main`을 조회해 바뀌면 fast-forward 후 이미지 빌드·DB 기동·Alembic·API healthcheck를 수행한다(공개 저장소, HTTPS clone, 배포 경로 `/home1/ncloud/Codyssey-GiantKiller-BE`).
+- 추가 파일: `compose.deploy.yaml`, `deploy/deploy.sh`, `deploy/auto-deploy.sh`(cron 진입점·락·마지막 시도 커밋 기록·안전 검사), `docs/DEPLOY.md`. GitHub Actions workflow는 제거했다. 앱 API·모델·의존성은 변경하지 않는다.
+- 검증: Bash 문법 검사 통과. `auto-deploy.sh`는 임시 저장소와 가짜 deploy로 최초 배포·무변경 무시·새 커밋 배포·추적 변경 거부·실패 후 재시도 안 함·`--force`·동시 실행 락을 확인했다. 별도 Compose 프로젝트·임시 PostgreSQL 볼륨에서 이미지 빌드·Alembic head 적용·API/DB healthy·`/health` 200도 확인했다(기존 `.env`·프로젝트 DB 미사용).
+- 서버 실제 배포는 미완료다(`.env` 작성·기존 스택 down·최초 `--force` 배포·cron 등록 필요). HTTPS·자동 롤백·로그 로테이션·실제 FCM/AI 검증은 포함하지 않는다.
+
 ## Goal
 
 - FastAPI Users 계정과 가족·초대를 연결한다.
