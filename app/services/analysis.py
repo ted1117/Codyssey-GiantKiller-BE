@@ -46,7 +46,7 @@ class AnalysisService:
         return member_id
 
     async def check_alert(self, user_id: UUID, body: AlertCheck) -> AlertCheckRead:
-        """문자를 분석하고 사칭 사건과 가족 확인을 함께 저장합니다."""
+        """문자를 분석해 사칭은 가족 확인과, 주의 필요 문자는 알림과 함께 저장합니다."""
         member_id = await self._parent(body.family_id, user_id)
         try:
             result = AlertAnalysisResult.model_validate(
@@ -75,6 +75,10 @@ class AnalysisService:
             except BaseException:
                 await self.session.rollback()
                 raise
+        elif result.requires_attention:
+            event_id = await self.events.create_alert(
+                body.family_id, member_id, body.occurred_at, result
+            )
         return AlertCheckRead(
             result=result, event_id=event_id, verification_id=verification_id
         )

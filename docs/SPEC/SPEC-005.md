@@ -306,3 +306,12 @@ PENDING → PROCESSING → COMPLETED
 - 모델·마이그레이션·의존성·`.env`는 변경하지 않는다.
 
 검증 결과: 독립 PostgreSQL 18에서 신규 1개 포함 전체 `207 passed`, DeprecationWarning 오류 처리. CALL 지시 2건의 유형 정렬과 설명 비노출, ALERT 빈 지시, NULL 분류·위험도, 목록의 `instructions` 부재, PATCH 8개 필드를 검증한다. Ruff 검사·포맷과 diff 공백 검사 통과.
+
+## 14. 위험 문자 사건 공개 (2026-10-31)
+
+사용자 승인으로 PRD-005 6.0.3을 구현했다.
+
+- `SecurityEventRepository._visible()`에 `event_type == "ALERT" AND requires_attention IS TRUE` 분기를 추가했다. 기존 두 분기는 그대로이며 사칭 문자는 NULL `requires_attention`·`analysis_status`를 유지한다.
+- `requires_attention`이 false·NULL인 사칭 이외 `ALERT`는 목록·상세 모두 숨긴다(상세는 404 `EVENT_NOT_FOUND`).
+- 목록·상세·상태 변경이 같은 조건을 쓰므로 위험 문자 사건도 대응 상태 변경 대상이다. 모델·마이그레이션·의존성은 변경하지 않는다.
+- 검증: `FRAUD`·`requires_attention=true` 사건의 목록·상세 공개, false·NULL 숨김. 전체 `212 passed`.

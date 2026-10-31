@@ -12,12 +12,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.ai import AIClient
-from app.models import SecurityEvent
+from app.models import SecurityEvent, VerificationRequest
 from app.models.family import FamilyRole
 from app.models.notification import NotificationRequest
 from app.repositories.family import FamilyMemberRepository
 from app.schemas.analysis import AlertAnalysisResult
 from app.schemas.event import CallAnalysisResult
+from app.schemas.push import PushMessageType
 from app.services.analysis import AnalysisService
 from tests.test_api import account, family
 
@@ -89,7 +90,7 @@ def test_call_flow(
 
 
 @pytest.mark.parametrize(
-    "kind", ["impersonation", "normal", "invalid", "unconfigured", "child"]
+    "kind", ["impersonation", "normal", "risk", "invalid", "unconfigured", "child"]
 )
 def test_alert_flow(
     client: AsyncClient,
@@ -113,14 +114,18 @@ def test_alert_flow(
         await session.commit()
         ai = AsyncMock(spec=AIClient)
         ai.configured = True
+        push = AsyncMock()
         ai.analyze_alert.return_value = {
-            "classification": "CHILD_IMPERSONATION" if kind != "normal" else "TEST",
-            "requires_attention": kind != "invalid",
+            "classification": {"normal": "TEST", "risk": "FRAUD"}.get(
+                kind, "CHILD_IMPERSONATION"
+            ),
+            "requires_attention": kind not in {"invalid", "normal"},
+            **({"risk_level": "HIGH", "summary": "요약"} if kind == "risk" else {}),
         }
         if kind != "unconfigured":
 
             def service(session: SessionDep):
-                return AnalysisService(session, ai, AsyncMock())
+                return AnalysisService(session, ai, push)
 
             application.dependency_overrides[get_analysis_service] = service
         response = await client.post(
@@ -135,17 +140,78 @@ def test_alert_flow(
         expected = {"invalid": 502, "unconfigured": 503, "child": 403}.get(kind, 200)
         assert response.status_code == expected, response.text
         count = await session.scalar(select(func.count()).select_from(SecurityEvent))
-        assert count == (1 if kind == "impersonation" else 0)
+        assert count == (1 if kind in {"impersonation", "risk"} else 0)
+        if kind in {"normal", "risk"}:
+            assert push.send.await_count == (1 if kind == "risk" else 0)
         notifications = await session.scalar(
             select(func.count()).select_from(NotificationRequest)
         )
         assert notifications == (2 if kind == "impersonation" else 0)
         if kind == "impersonation":
             assert response.json()["verification_id"]
+        if kind == "risk":
+            data = response.json()
+            assert data["verification_id"] is None and data["event_id"]
+            row = await session.scalar(select(SecurityEvent))
+            assert str(row.id) == data["event_id"]
+            assert (row.event_type, row.classification) == ("ALERT", "FRAUD")
+            assert (row.risk_level, row.summary) == ("HIGH", "요약")
+            assert row.requires_attention is True
+            assert (row.analysis_status, row.status) == ("COMPLETED", "OPEN")
+            assert notifications == 0
+            assert (
+                await session.scalar(
+                    select(func.count()).select_from(VerificationRequest)
+                )
+                == 0
+            )
+            message = push.send.await_args.args[0]
+            assert message.message_type == PushMessageType.RISK_WARNING
+            assert message.event_id == row.id and message.verification_id is None
         if kind == "unconfigured":
             assert response.json() == {"detail": "AI_NOT_CONFIGURED"}
         if kind == "child":
             ai.analyze_alert.assert_not_called()
+
+    runner.run(scenario())
+
+
+def test_alert_push_failure_keeps_event(
+    session: AsyncSession,
+    runner: asyncio.Runner,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """푸시 예외가 나도 사건과 결과를 유지하고 예외 문구를 기록하지 않습니다."""
+    from app.schemas.analysis import AlertCheck
+    from tests.test_membership import add_family, add_user
+
+    async def scenario() -> None:
+        row, _ = await add_family(session)
+        parent = await add_user(session)
+        await FamilyMemberRepository(session).create(
+            row.id, parent.id, FamilyRole.PARENT
+        )
+        await session.commit()
+        ai = AsyncMock(spec=AIClient)
+        ai.configured = True
+        ai.analyze_alert.return_value = {
+            "classification": "FRAUD",
+            "requires_attention": True,
+        }
+        push = AsyncMock()
+        push.send.side_effect = RuntimeError("private-error")
+        with caplog.at_level("ERROR"):
+            read = await AnalysisService(session, ai, push).check_alert(
+                parent.id,
+                AlertCheck(
+                    family_id=row.id, occurred_at=datetime.now(UTC), text="masked"
+                ),
+            )
+        assert read.event_id and read.verification_id is None
+        assert push.send.await_count == 1
+        assert await session.get(SecurityEvent, read.event_id) is not None
+        assert "alert_push_failed" in caplog.text
+        assert "private-error" not in caplog.text
 
     runner.run(scenario())
 
