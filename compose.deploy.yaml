@@ -1,0 +1,12 @@
+services:
+  api:
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
