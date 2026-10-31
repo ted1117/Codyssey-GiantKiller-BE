@@ -2,24 +2,26 @@ import asyncio
 import re
 import threading
 from collections.abc import Callable
-from typing import Annotated, Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 import httpx
 from fastapi import UploadFile
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.exceptions import ServiceError
 from app.schemas.analysis import AlertAnalysisResult
 from app.schemas.event import CallAnalysisResult
 
 SYSTEM_PROMPT = """\
-당신은 한국 금융·통신 사기 탐지 분석가입니다. 주어진 내용(문자 메시지 또는 통화 전사본)이
-스미싱/보이스피싱/스팸인지 판별합니다.
-- 스미싱/스팸(1): 기관·금융사·택배 사칭, 수상한 링크·앱 설치 유도, 개인정보·계좌·인증번호 요구,
-  송금·대출 유도, 지인 사칭, 도박·성인·대출 광고 등
-- 일반(0): 지인 간 일상 대화, 정상적인 안내·알림, 내용에 위험 신호가 없는 경우
+당신은 한국 금융·통신 사기 탐지 분석가입니다. 주어진 내용(문자 메시지 또는 통화 전사본)을
+아래 셋 중 하나로 분류합니다.
+- CHILD_IMPERSONATION: 자녀·손주 등 가족을 사칭하는 경우. 휴대폰 고장·분실·번호 변경 등을
+  핑계로 새 번호로 연락을 유도하거나, 송금·상품권 구매·신분증·계좌·인증번호·앱 설치를 요구하는 경우
+- FRAUD: 그 외 스미싱/보이스피싱/스팸. 기관·금융사·택배 사칭, 수상한 링크·앱 설치 유도,
+  개인정보·계좌·인증번호 요구, 송금·대출 유도, 가족 이외 지인 사칭, 도박·성인·대출 광고 등
+- NORMAL: 지인 간 일상 대화, 정상적인 안내·알림, 내용에 위험 신호가 없는 경우
 통화 전사본은 음성인식 오류가 섞여 있을 수 있습니다. 반드시 JSON 한 줄로만 답하세요:
-{"label": 0 또는 1, "confidence": 0~1, "reason": "한국어 한 문장 근거"}"""  # noqa: E501
+{"category": "CHILD_IMPERSONATION" 또는 "FRAUD" 또는 "NORMAL", "confidence": 0~1, "reason": "한국어 한 문장 근거"}"""  # noqa: E501
 HIGH_CONFIDENCE = 0.8
 MAX_INPUT_CHARS = 4000
 
@@ -33,10 +35,10 @@ class AIRequestError(ConnectionError):
 
 
 class _Verdict(BaseModel):
-    """LLM이 반환한 0/1 판정입니다."""
+    """LLM이 반환한 3분류 판정입니다."""
 
     model_config = ConfigDict(extra="ignore", strict=True, hide_input_in_errors=True)
-    label: Annotated[StrictInt, Field(ge=0, le=1)]
+    category: Literal["CHILD_IMPERSONATION", "FRAUD", "NORMAL"]
     confidence: float = Field(ge=0, le=1)
     reason: str
 
@@ -92,7 +94,7 @@ class AIClient:
         self.transcribe = transcribe or (lambda file: _transcribe(stt_model, file))
 
     async def _classify(self, text: str) -> _Verdict:
-        """게이트웨이에 한 번 요청해 0/1 판정을 검증합니다."""
+        """게이트웨이에 한 번 요청해 3분류 판정을 검증합니다."""
         body = {
             "model": self.model,
             "messages": [
@@ -151,17 +153,17 @@ class AIClient:
 
 
 def _result(verdict: _Verdict) -> dict[str, Any]:
-    """0/1 판정을 내부 분류·위험 수준으로 매핑합니다."""
-    if verdict.label == 1:
+    """3분류 판정을 내부 분류·위험 수준으로 매핑합니다."""
+    if verdict.category == "NORMAL":
         return {
-            "classification": "FRAUD",
-            "requires_attention": True,
-            "risk_level": "HIGH" if verdict.confidence >= HIGH_CONFIDENCE else "MEDIUM",
+            "classification": "NORMAL",
+            "requires_attention": False,
+            "risk_level": "LOW",
             "summary": verdict.reason,
         }
     return {
-        "classification": "NORMAL",
-        "requires_attention": False,
-        "risk_level": "LOW",
+        "classification": verdict.category,
+        "requires_attention": True,
+        "risk_level": "HIGH" if verdict.confidence >= HIGH_CONFIDENCE else "MEDIUM",
         "summary": verdict.reason,
     }

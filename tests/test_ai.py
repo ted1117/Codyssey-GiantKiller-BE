@@ -26,8 +26,12 @@ def reply(content: str) -> dict:
     return {"choices": [{"message": {"content": content}}]}
 
 
-def verdict(label: object, confidence: object = 0.9, reason: object = "SECRET") -> str:
-    return json.dumps({"label": label, "confidence": confidence, "reason": reason})
+def verdict(
+    category: object, confidence: object = 0.9, reason: object = "SECRET"
+) -> str:
+    return json.dumps(
+        {"category": category, "confidence": confidence, "reason": reason}
+    )
 
 
 def make(
@@ -54,26 +58,37 @@ def make(
 
 
 def test_alert_fraud_mapping() -> None:
-    """label 1은 신뢰도에 따라 HIGH·MEDIUM 사기로 변환합니다."""
-    high, _ = make(verdict(1, 0.9, "송금 유도"))
+    """FRAUD는 신뢰도에 따라 HIGH·MEDIUM 사기로 변환합니다."""
+    high, _ = make(verdict("FRAUD", 0.9, "송금 유도"))
     result = asyncio.run(high.analyze_alert("text"))
     assert (result.classification, result.requires_attention) == ("FRAUD", True)
     assert (result.risk_level, result.summary) == ("HIGH", "송금 유도")
-    medium, _ = make(verdict(1, 0.5))
+    medium, _ = make(verdict("FRAUD", 0.5))
     assert asyncio.run(medium.analyze_alert("text")).risk_level == "MEDIUM"
 
 
 def test_alert_normal_mapping() -> None:
-    """label 0은 주의 불필요 정상으로 변환합니다."""
-    client, _ = make(verdict(0, 0.99))
+    """NORMAL은 주의 불필요 정상으로 변환합니다."""
+    client, _ = make(verdict("NORMAL", 0.99))
     result = asyncio.run(client.analyze_alert("text"))
     assert (result.classification, result.requires_attention) == ("NORMAL", False)
     assert result.risk_level == "LOW"
 
 
+def test_alert_impersonation_mapping() -> None:
+    """CHILD_IMPERSONATION은 신뢰도에 따라 HIGH·MEDIUM 주의 필요로 변환합니다."""
+    high, _ = make(verdict("CHILD_IMPERSONATION", 0.9, "자녀 사칭"))
+    result = asyncio.run(high.analyze_alert("text"))
+    assert result.classification == "CHILD_IMPERSONATION"
+    assert (result.requires_attention, result.risk_level) == (True, "HIGH")
+    assert result.summary == "자녀 사칭"
+    medium, _ = make(verdict("CHILD_IMPERSONATION", 0.5))
+    assert asyncio.run(medium.analyze_alert("text")).risk_level == "MEDIUM"
+
+
 def test_request_shape() -> None:
     """게이트웨이 경로·인증·모델·프롬프트를 확인합니다."""
-    client, seen = make(verdict(0), base_url="https://gw.test/")
+    client, seen = make(verdict("NORMAL"), base_url="https://gw.test/")
     asyncio.run(client.analyze_alert("안녕 내용"))
     request = seen[0]
     assert request.url.path == "/v1/chat/completions"
@@ -89,8 +104,8 @@ def test_request_shape() -> None:
 @pytest.mark.parametrize(
     "wrapped",
     [
-        "판정입니다.\n" + verdict(1) + "\n끝",
-        "```json\n" + verdict(1) + "\n```",
+        "판정입니다.\n" + verdict("FRAUD") + "\n끝",
+        "```json\n" + verdict("FRAUD") + "\n```",
     ],
 )
 def test_wrapped_reply_parses(wrapped: str) -> None:
@@ -103,13 +118,15 @@ def test_wrapped_reply_parses(wrapped: str) -> None:
     "content",
     [
         "죄송합니다",
-        verdict(2),
-        verdict("1"),
-        verdict(True),
-        verdict(1, 1.5),
-        verdict(1, "0.9"),
-        verdict(1, 0.9, "  "),
-        json.dumps({"label": 1, "confidence": 0.9}),
+        verdict("SCAM"),
+        verdict("fraud"),
+        verdict(1),
+        verdict(None),
+        verdict("FRAUD", 1.5),
+        verdict("FRAUD", "0.9"),
+        verdict("FRAUD", 0.9, "  "),
+        json.dumps({"confidence": 0.9, "reason": "SECRET"}),
+        json.dumps({"label": 1, "confidence": 0.9, "reason": "SECRET"}),
         "{not json}",
     ],
 )
@@ -147,7 +164,7 @@ def test_analyze_call() -> None:
         received.append(file.read())
         return "계좌로 송금하세요"
 
-    client, seen = make(verdict(1, 0.95), transcribe=transcribe)
+    client, seen = make(verdict("FRAUD", 0.95), transcribe=transcribe)
     result = asyncio.run(client.analyze_call(UploadFile(BytesIO(b"audio"))))
     assert isinstance(result, CallAnalysisResult)
     assert result.instructions == [] and result.classification == "FRAUD"
@@ -155,9 +172,20 @@ def test_analyze_call() -> None:
     assert "계좌로 송금하세요" in json.loads(seen[0].content)["messages"][1]["content"]
 
 
+def test_analyze_call_impersonation() -> None:
+    """자녀 사칭 통화는 해당 분류의 통화 결과로 반환합니다."""
+    client, _ = make(
+        verdict("CHILD_IMPERSONATION"), transcribe=lambda file: "엄마 나야"
+    )
+    result = asyncio.run(client.analyze_call(UploadFile(BytesIO(b"audio"))))
+    assert isinstance(result, CallAnalysisResult)
+    assert result.classification == "CHILD_IMPERSONATION"
+    assert result.requires_attention is True
+
+
 def test_call_failures() -> None:
     """빈 전사본·전사 오류는 분류 없이 요청 실패입니다."""
-    empty, seen = make(verdict(0), transcribe=lambda file: "  ")
+    empty, seen = make(verdict("NORMAL"), transcribe=lambda file: "  ")
     with pytest.raises(AIRequestError):
         asyncio.run(empty.analyze_call(UploadFile(BytesIO(b"a"))))
     assert seen == []
@@ -165,7 +193,7 @@ def test_call_failures() -> None:
     def broken(file: BinaryIO) -> str:
         raise RuntimeError("private")
 
-    failing, seen = make(verdict(0), transcribe=broken)
+    failing, seen = make(verdict("NORMAL"), transcribe=broken)
     with pytest.raises(AIRequestError) as error:
         asyncio.run(failing.analyze_call(UploadFile(BytesIO(b"a"))))
     assert seen == [] and error.value.__cause__ is None
@@ -201,7 +229,7 @@ def test_alert_api_with_real_client(
             UUID(family_id), UUID(parent_id), FamilyRole.PARENT
         )
         await session.commit()
-        ai, _ = make(verdict(1, 0.9, "링크 유도"))
+        ai, _ = make(verdict("FRAUD", 0.9, "링크 유도"))
         application.dependency_overrides[get_ai_client] = lambda: ai
         response = await client.post(
             "/api/v1/alerts/check",
@@ -215,6 +243,43 @@ def test_alert_api_with_real_client(
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["event_id"] and data["result"]["classification"] == "FRAUD"
+
+    runner.run(scenario())
+
+
+def test_alert_api_impersonation_with_real_client(
+    client: AsyncClient,
+    application: FastAPI,
+    session: AsyncSession,
+    runner: asyncio.Runner,
+) -> None:
+    """자녀 사칭 판정은 사건과 가족 확인 요청을 함께 만듭니다."""
+
+    async def scenario() -> None:
+        from app.api.dependencies import get_ai_client
+
+        _, child_headers = await account(client)
+        family_id = await family(client, child_headers)
+        parent_id, headers = await account(client)
+        await FamilyMemberRepository(session).create(
+            UUID(family_id), UUID(parent_id), FamilyRole.PARENT
+        )
+        await session.commit()
+        ai, _ = make(verdict("CHILD_IMPERSONATION", 0.9, "자녀 사칭"))
+        application.dependency_overrides[get_ai_client] = lambda: ai
+        response = await client.post(
+            "/api/v1/alerts/check",
+            headers=headers,
+            json={
+                "family_id": family_id,
+                "occurred_at": datetime.now(UTC).isoformat(),
+                "text": "masked",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["event_id"] and data["verification_id"]
+        assert data["result"]["classification"] == "CHILD_IMPERSONATION"
 
     runner.run(scenario())
 
@@ -237,7 +302,7 @@ def test_audio_too_large(
             UUID(family_id), UUID(parent_id), FamilyRole.PARENT
         )
         await session.commit()
-        ai, seen = make(verdict(0), transcribe=lambda file: "text")
+        ai, seen = make(verdict("NORMAL"), transcribe=lambda file: "text")
         application.dependency_overrides[get_ai_client] = lambda: ai
         response = await client.post(
             "/api/v1/calls/analyze",

@@ -114,9 +114,9 @@ AI 예외 처리 범위는 AI 호출·결과 검증에 한정한다. DB 저장 �
 ### 4.1. 실제 계약 (2026-10-31 확정)
 
 - 별도 AI 서버 없이 백엔드가 Codyssey LLM 게이트웨이(OpenAI 호환)를 직접 호출한다. `POST {AI_BASE_URL}/v1/chat/completions`, `Authorization: Bearer {AI_API_KEY}`, 기본 모델 `gpt-5.4`, `max_tokens=300`, `temperature=0`.
-- 시스템 프롬프트는 한국 금융·통신 사기 분석가로서 문자·통화 전사본이 스미싱·보이스피싱·스팸인지 판별하고 `{"label": 0|1, "confidence": 0~1, "reason": "..."}` JSON 한 줄로만 답하게 한다. 사용자 입력은 본문 앞 4000자만 보낸다.
-- 응답 본문에서 첫 `{...}`를 정규식으로 추출해 검증한다. `label`은 엄격한 정수 0/1(불리언·문자열 거부), `confidence`는 0~1 실수, `reason`은 공백이 아닌 문자열이다. 실패는 `INVALID_ANALYSIS_RESULT`다.
-- 매핑: `label=1` → `FRAUD`·`requires_attention=true`·위험 수준 `HIGH`(confidence 0.8 이상) 또는 `MEDIUM`, `summary=reason`. `label=0` → `NORMAL`·`requires_attention=false`·`LOW`. 통화 `instructions`는 항상 빈 목록이다. LLM은 `CHILD_IMPERSONATION`을 만들지 않는다.
+- 시스템 프롬프트는 한국 금융·통신 사기 분석가로서 문자·통화 전사본을 `CHILD_IMPERSONATION`(가족 사칭)·`FRAUD`(그 외 스미싱·보이스피싱·스팸)·`NORMAL` 중 하나로 분류하고 `{"category": "CHILD_IMPERSONATION"|"FRAUD"|"NORMAL", "confidence": 0~1, "reason": "..."}` JSON 한 줄로만 답하게 한다. 사용자 입력은 본문 앞 4000자만 보낸다.
+- 응답 본문에서 첫 `{...}`를 정규식으로 추출해 검증한다. `category`는 정확히 세 값 중 하나(대소문자 변형·미지 값·누락 거부), `confidence`는 0~1 실수, `reason`은 공백이 아닌 문자열이다. 실패는 `INVALID_ANALYSIS_RESULT`다.
+- 매핑: `CHILD_IMPERSONATION`·`FRAUD` → 같은 이름의 분류·`requires_attention=true`·위험 수준 `HIGH`(confidence 0.8 이상) 또는 `MEDIUM`, `summary=reason`. `NORMAL` → `NORMAL`·`requires_attention=false`·`LOW`. 통화 `instructions`는 항상 빈 목록이다. `CHILD_IMPERSONATION` 문자는 기존 가족 확인 흐름으로, 통화는 해당 분류로 저장된다.
 - 통화 STT는 `faster-whisper`의 `small` 모델을 백엔드 프로세스 안에서 CPU·int8로 실행한다(`language="ko"`). 모델은 프로세스당 한 번 지연 로딩하며 키가 설정되면 시작 시 백그라운드로 미리 불러온다. 전사본이 비면 정상으로 판정하지 않고 `AI_REQUEST_FAILED`로 처리한다.
 - 문자·음성·전사본·LLM 원문 응답·키·예외 문구는 로그에 남기지 않는다.
 
@@ -204,7 +204,7 @@ HTTP 클라이언트는 현재 테스트에서 사용하는 `httpx`를 후보로
 
 ## 11. 실제 AI 연결 (2026-10-31)
 
-사용자 결정: 백엔드가 게이트웨이를 직접 호출하고(별도 AI 서버 없음), 0/1 판정을 그대로 사용하며(`CHILD_IMPERSONATION` 미생성), STT는 faster-whisper `small`을 CPU·int8로 백엔드 안에서 실행한다.
+사용자 결정: 백엔드가 게이트웨이를 직접 호출하고(별도 AI 서버 없음), 3분류(`CHILD_IMPERSONATION`·`FRAUD`·`NORMAL`) 판정을 사용하며, STT는 faster-whisper `small`을 CPU·int8로 백엔드 안에서 실행한다.
 
 - `app/core/ai.py`: `AIClient`를 게이트웨이 호출·응답 검증·STT로 구현했다. 키 없이 `AIClient()`를 만들면 기존처럼 503 `AI_NOT_CONFIGURED`다. 시간 초과는 `TimeoutError`, 그 외 HTTP·응답 구조 오류와 STT 실패·빈 전사본은 `AIRequestError`(`ConnectionError` 하위)로 `AnalysisService`가 `AI_REQUEST_FAILED`로 변환한다. 판정 검증 실패는 pydantic `ValidationError`로 `INVALID_ANALYSIS_RESULT`가 된다.
 - `app/core/config.py`·`.env.example`·`compose.yaml`: `AI_API_KEY`·`AI_BASE_URL`·`AI_MODEL`·`AI_TIMEOUT_SECONDS`·`STT_MODEL`. 빈 값은 무시되어 기본값을 쓴다. `Dockerfile`은 `/home/app/.cache/huggingface`를 `app` 소유로 만들고 `stt_cache` 볼륨으로 모델 다운로드를 유지한다.
