@@ -547,6 +547,7 @@ def test_configured_invitation_link_and_openapi(
             f"{PREFIX}/events/{{event_id}}/status",
             f"{PREFIX}/alerts/check",
             f"{PREFIX}/calls/analyze",
+            f"{PREFIX}/actions/app-install",
             "/health",
             f"{PREFIX}/auth/register",
             f"{PREFIX}/auth/login",
