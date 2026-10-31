@@ -97,7 +97,8 @@ class PushService:
         title, body = _MESSAGES[message.message_type]
         data = {
             "event_id": str(message.event_id),
-            "message_type": message.message_type.value,
+            # message_type은 FCM 예약 data 키라 push_type으로 전달한다.
+            "push_type": message.message_type.value,
         }
         if message.verification_id is not None:
             data["verification_id"] = str(message.verification_id)

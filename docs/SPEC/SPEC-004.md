@@ -159,13 +159,14 @@ FCM 메시지 예시:
   },
   "data": {
     "event_id": "<event-uuid>",
-    "message_type": "VERIFY_REQUEST",
+    "push_type": "VERIFY_REQUEST",
     "verification_id": "<verification-uuid>",
     "actions": "[\"SENT\",\"NOT_SENT\"]"
   }
 }
 ```
 
+- FCM은 `message_type`(그 외 `from`, `notification`, `collapse_key`, `google.*`, `gcm.*`)을 data 예약 키로 쓰므로 유형은 `push_type`에 담는다. 예약 키를 쓰면 `InvalidArgumentError`로 발송이 실패한다. Android 앱은 `data["push_type"]`을 읽어야 한다. 내부 `PushSend.message_type` 필드명은 그대로다.
 - `data`의 값은 모두 문자열이다. 해당하지 않는 선택 키는 생략한다.
 - `actions`는 `VERIFY_REQUEST`에만 포함하며, 기존 응답 값 `SENT`·`NOT_SENT`를 JSON 문자열로 전달한다.
 - 응답 액션 정보가 자동으로 Android 알림 버튼을 생성하지는 않는다. 버튼·응답 화면은 앱 구현이다.
