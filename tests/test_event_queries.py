@@ -6,13 +6,22 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import SecurityEvent
+from app.models import CallInstruction, SecurityEvent
 from app.models.family import FamilyRole
 from app.repositories.family import FamilyMemberRepository
 from tests.test_api import account, family
 
 PREFIX = "/api/v1/events"
-FIELDS = {"id", "summary", "analysis_status", "status", "occurred_at"}
+FIELDS = {
+    "id",
+    "event_type",
+    "classification",
+    "risk_level",
+    "summary",
+    "analysis_status",
+    "status",
+    "occurred_at",
+}
 
 
 async def seed_family(
@@ -85,6 +94,8 @@ def test_list_detail_and_pagination(
             str(row.id) for row in [alert, *ordered, oldest]
         ]
         assert all(set(row) == FIELDS for row in rows)
+        assert rows[0]["classification"] == "CHILD_IMPERSONATION"
+        assert rows[0]["risk_level"] is None and rows[0]["event_type"] == "ALERT"
         page = await client.get(
             PREFIX, headers=child, params={"family_id": fid, "limit": 2, "offset": 1}
         )
@@ -92,7 +103,7 @@ def test_list_detail_and_pagination(
         for row in rows:
             detail = await client.get(f"{PREFIX}/{row['id']}", headers=child)
             assert detail.status_code == 200
-            assert detail.json() == row
+            assert detail.json() == {**row, "instructions": []}
         other_child_id, other_child = await account(client)
         await FamilyMemberRepository(session).create(
             UUID(fid), UUID(other_child_id), FamilyRole.CHILD
@@ -108,6 +119,53 @@ def test_list_detail_and_pagination(
         # 조회만으로 대응 상태를 변경하지 않는다.
         await session.refresh(alert)
         assert alert.status == "OPEN"
+
+    runner.run(scenario())
+
+
+def test_detail_instructions_hide_description(
+    client: AsyncClient, session: AsyncSession, runner: asyncio.Runner
+) -> None:
+    """상세는 지시 유형만 정렬해 반환하고 설명은 어떤 응답에도 노출하지 않습니다."""
+
+    async def scenario() -> None:
+        fid, child, _, parent = await seed_family(client, session)
+        call = event(fid, parent, classification=None, risk_level=None)
+        other = event(fid, parent)
+        session.add_all([call, other])
+        await session.flush()
+        session.add_all(
+            [
+                CallInstruction(
+                    event_id=call.id,
+                    instruction_type=kind,
+                    description="secret-description",
+                )
+                for kind in ["TRANSFER_MONEY", "INSTALL_APP"]
+            ]
+            + [
+                CallInstruction(
+                    event_id=other.id,
+                    instruction_type="OTHER_EVENT",
+                    description="secret-description",
+                )
+            ]
+        )
+        await session.commit()
+        detail = await client.get(f"{PREFIX}/{call.id}", headers=child)
+        assert detail.status_code == 200
+        body = detail.json()
+        assert set(body) == FIELDS | {"instructions"}
+        assert body["instructions"] == [
+            {"instruction_type": "INSTALL_APP"},
+            {"instruction_type": "TRANSFER_MONEY"},
+        ]
+        assert body["classification"] is None and body["risk_level"] is None
+        listing = await client.get(PREFIX, headers=child, params={"family_id": fid})
+        assert all("instructions" not in row for row in listing.json())
+        for response in [detail, listing]:
+            assert "secret-description" not in response.text
+            assert "description" not in response.text
 
     runner.run(scenario())
 

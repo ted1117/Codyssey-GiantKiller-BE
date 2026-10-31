@@ -50,10 +50,9 @@ def test_transitions(
         assert row.analysis_status == "COMPLETED" and row.requires_attention is True
         if code == 200:
             assert set(response.json()) == FIELDS
-            assert (
-                response.json()
-                == (await client.get(f"{PREFIX}/{row.id}", headers=child)).json()
-            )
+            detail = (await client.get(f"{PREFIX}/{row.id}", headers=child)).json()
+            assert detail.pop("instructions") == []
+            assert response.json() == detail
         else:
             assert response.json() == {"detail": "EVENT_STATUS_CONFLICT"}
 

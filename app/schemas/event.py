@@ -31,15 +31,32 @@ Code = Annotated[TextValue, Field(max_length=64), AfterValidator(validate_code)]
 
 
 class EventRead(BaseModel):
-    """자녀에게 사건의 최소 요약과 상태·발생 시각을 반환합니다."""
+    """자녀에게 사건의 유형·분류·위험도·요약과 상태·발생 시각을 반환합니다."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    event_type: str
+    classification: str | None
+    risk_level: str | None
     summary: str | None
     analysis_status: str | None
     status: str
     occurred_at: datetime
+
+
+class EventInstructionRead(BaseModel):
+    """자녀에게 통화 지시의 유형만 반환하며 설명은 공개하지 않습니다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    instruction_type: str
+
+
+class EventDetailRead(EventRead):
+    """사건 상세에 관련 통화 지시 유형 목록을 더해 반환합니다."""
+
+    instructions: list[EventInstructionRead]
 
 
 class EventStatusUpdate(BaseModel):

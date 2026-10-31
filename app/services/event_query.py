@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ServiceError
 from app.models.family import FamilyRole
+from app.repositories.call_instruction import CallInstructionRepository
 from app.repositories.event import SecurityEventRepository
-from app.schemas.event import EventRead
+from app.schemas.event import EventDetailRead, EventInstructionRead, EventRead
 from app.services.family import FamilyService
 
 
@@ -15,6 +16,7 @@ class EventQueryService:
     def __init__(self, session: AsyncSession) -> None:
         """조회 저장소와 가족 권한 서비스를 구성합니다."""
         self.events = SecurityEventRepository(session)
+        self.instructions = CallInstructionRepository(session)
         self.families = FamilyService(session)
 
     async def _require_child(self, family_id: UUID, user_id: UUID) -> None:
@@ -32,10 +34,16 @@ class EventQueryService:
             for event in await self.events.list_visible(family_id, limit, offset)
         ]
 
-    async def get_detail(self, event_id: UUID, user_id: UUID) -> EventRead:
+    async def get_detail(self, event_id: UUID, user_id: UUID) -> EventDetailRead:
         """해당 가족 자녀에게 사건 상세를 반환하며 숨긴 사건은 404입니다."""
         event = await self.events.get_visible(event_id)
         if event is None:
             raise ServiceError(404, "EVENT_NOT_FOUND")
         await self._require_child(event.family_id, user_id)
-        return EventRead.model_validate(event)
+        instructions = await self.instructions.list_by_event(event.id)
+        return EventDetailRead(
+            **EventRead.model_validate(event).model_dump(),
+            instructions=[
+                EventInstructionRead.model_validate(item) for item in instructions
+            ],
+        )
