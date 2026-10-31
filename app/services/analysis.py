@@ -30,6 +30,7 @@ class AnalysisService:
         """요청 세션과 분석·알림 의존성을 저장합니다."""
         self.session = session
         self.ai = ai
+        self.push = push
         self.events = EventService(session, push)
 
     async def _parent(self, family_id: UUID, user_id: UUID) -> UUID:
@@ -67,7 +68,9 @@ class AnalysisService:
                     risk_level=result.risk_level,
                     summary=result.summary,
                 )
-                request = await VerificationService(self.session).create(event.id)
+                request = await VerificationService(self.session, self.push).create(
+                    event.id
+                )
                 event_id, verification_id = event.id, request.id
             except BaseException:
                 await self.session.rollback()

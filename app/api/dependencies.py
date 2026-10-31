@@ -24,9 +24,19 @@ def get_invitation_service(session: SessionDep) -> InvitationService:
     return InvitationService(session)
 
 
-def get_verification_service(session: SessionDep) -> VerificationService:
-    """가족 확인 서비스에 요청 세션을 주입합니다."""
-    return VerificationService(session)
+def get_push_service() -> PushService:
+    """요청 세션과 분리된 세션 팩토리로 알림 서비스를 만듭니다."""
+    return PushService(session_factory)
+
+
+PushServiceDep = Annotated[PushService, Depends(get_push_service)]
+
+
+def get_verification_service(
+    session: SessionDep, push: PushServiceDep
+) -> VerificationService:
+    """가족 확인 서비스에 요청 세션과 알림 서비스를 주입합니다."""
+    return VerificationService(session, push)
 
 
 def get_push_registration_service(session: SessionDep) -> PushRegistrationService:
@@ -44,9 +54,9 @@ VerificationServiceDep = Annotated[
 ]
 
 
-def get_analysis_service(session: SessionDep) -> AnalysisService:
+def get_analysis_service(session: SessionDep, push: PushServiceDep) -> AnalysisService:
     """미설정 AI 클라이언트와 기존 알림 서비스를 주입합니다."""
-    return AnalysisService(session, AIClient(), PushService(session_factory))
+    return AnalysisService(session, AIClient(), push)
 
 
 AnalysisServiceDep = Annotated[AnalysisService, Depends(get_analysis_service)]

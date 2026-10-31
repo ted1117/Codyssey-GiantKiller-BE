@@ -2,6 +2,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -91,8 +92,10 @@ def application(
     get_settings.cache_clear()
 
     from app import main
+    from app.api.dependencies import get_push_service
     from app.core.database import get_session
     from app.main import app
+    from app.services.push import PushService
 
     test_sessions = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(main, "engine", engine)
@@ -110,6 +113,9 @@ def application(
 
     app.dependency_overrides[get_session] = get_test_session
     app.dependency_overrides[get_settings] = lambda: settings
+    # API 테스트가 실제 FCM이나 개발 DB에 접근하지 않도록 발송을 기록만 한다.
+    push = AsyncMock(spec=PushService)
+    app.dependency_overrides[get_push_service] = lambda: push
     try:
         yield app
     finally:
