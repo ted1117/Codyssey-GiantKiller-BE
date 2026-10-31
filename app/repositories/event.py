@@ -1,8 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.event import AnalysisStatus, EventStatus, SecurityEvent
 from app.schemas.event import CallAnalysisResult
@@ -50,6 +51,56 @@ class SecurityEventRepository:
                 populate_existing=True
             )
         return await self.session.scalar(statement)
+
+    @staticmethod
+    def _visible() -> ColumnElement[bool]:
+        # 사칭 문자는 기존 저장 경로에서 분석 상태·판정값을 채우지 않는다.
+        return or_(
+            and_(
+                SecurityEvent.event_type == "CALL",
+                SecurityEvent.analysis_status == AnalysisStatus.COMPLETED,
+                SecurityEvent.requires_attention.is_(True),
+            ),
+            and_(
+                SecurityEvent.event_type == "ALERT",
+                SecurityEvent.classification == "CHILD_IMPERSONATION",
+            ),
+        )
+
+    async def list_visible(
+        self, family_id: UUID, limit: int, offset: int
+    ) -> list[SecurityEvent]:
+        """공개 대상 사건만 발생 시각 최신순으로 제한해 조회합니다."""
+        statement = (
+            select(SecurityEvent)
+            .where(SecurityEvent.family_id == family_id, self._visible())
+            .order_by(
+                SecurityEvent.occurred_at.desc(),
+                SecurityEvent.created_at.desc(),
+                SecurityEvent.id.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(await self.session.scalars(statement))
+
+    async def get_visible(
+        self, event_id: UUID, *, for_update: bool = False
+    ) -> SecurityEvent | None:
+        """목록과 동일한 공개 조건으로 사건 하나를 조회합니다."""
+        statement = select(SecurityEvent).where(
+            SecurityEvent.id == event_id, self._visible()
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
+        return await self.session.scalar(statement)
+
+    async def update_status(self, event: SecurityEvent, status: EventStatus) -> None:
+        """검증된 대응 상태를 저장하며 commit은 서비스가 담당합니다."""
+        event.status = status
+        await self.session.flush()
 
     async def create_call(
         self, family_id: UUID, parent_member_id: UUID, occurred_at: datetime

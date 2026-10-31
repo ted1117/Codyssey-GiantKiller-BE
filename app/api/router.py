@@ -1,8 +1,19 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, families, invitations, push_registrations, users, verify
+from app.api.v1 import (
+    analysis,
+    auth,
+    events,
+    families,
+    invitations,
+    push_registrations,
+    users,
+    verify,
+)
 
 router = APIRouter()
+router.include_router(analysis.router, prefix="/api/v1")
+router.include_router(events.router, prefix="/api/v1")
 router.include_router(auth.router, prefix="/api/v1")
 router.include_router(users.router, prefix="/api/v1")
 router.include_router(families.router, prefix="/api/v1")

@@ -10,13 +10,23 @@ Last updated: 2026-10-31 KST
 
 ## Current Status
 
-- Status: PRD-005 최소 통화 사건 내부 서비스·자녀 알림 연결 구현 및 자동 검증 완료, 실제 AI·기기 연동 미검증
-- Current focus: PRD-005 통화 사건 최소 구현 검토. 조회·실제 AI 연결·앱 설치 연관 분석은 후속
-- Branch: `feature/call-events` (2026-10-31 커밋·PR 준비 시 확인)
+- Status: PRD-002 1차 및 PRD-005 자녀 사건 조회·대응 변경 구현·자동 검증 완료. 실제 AI·입력 제한·기기 연동은 미완료
+- Current focus: 자녀 사건 조회·대응 변경 완료, 독립 PostgreSQL 전체 198개 테스트 통과. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
+- Branch: `feature/child-event-queries` (PRD-002 1차·자녀 조회·대응 변경 포함)
 - Related issue/PR: 없음
 
 ## Decisions
 
+- 2026-10-31: 자녀 사건 대응 상태 변경을 추가 승인받아 `PATCH /api/v1/events/{event_id}/status`를 구현했다. 조회와 같은 공개 조건·CHILD 권한을 적용하고 확인·직접 해결·같은 상태 재요청을 허용한다. 완료 상태의 역행은 409로 거부하며 사건 행 잠금으로 동시 변경을 직렬화한다. 분석·가족 확인·알림은 변경하지 않는다.
+
+- 2026-10-31: 사용자 승인으로 PRD-005 자녀 사건 목록·상세 조회를 추가했다. 해당 가족 CHILD만 사건 ID·요약·분석 상태·대응 상태·발생 시각을 조회한다. 정상·대기·진행·실패 통화는 목록·상세 모두 숨기고, 완료된 주의 필요 통화와 기존 자녀 사칭 문자를 공통 DB 조건으로 공개한다. 상세 조회는 대응 상태를 변경하지 않는다. 대응 변경·오늘 요약·지시·가족 확인 상세 공개는 이번 범위에서 제외한다.
+
+- 2026-10-31: 사용자 구현 승인에 따라 PRD-002의 1차 백엔드 API·서비스 연결을 완료했다. 일반 요청은 AI 미설정 503을 반환하고, 테스트 주입으로 통화 선저장·분석 결과/실패·자녀 알림과 문자 가족 확인 연결을 검증했다. 실제 AI 호출·형식·크기·시간 제한은 미완료다.
+
+- 2026-10-31: 사용자 승인으로 PRD-002·SPEC-002 설계 검토 3건을 반영했다. AI 미설정은 입력·권한 검증 후 사건 생성 전 `503 AI_NOT_CONFIGURED`, 파일 크기 검사 후 `seek(0)`, 사칭 분류와 `requires_attention=false`는 결과 검증 실패로 처리한다. 기존 통화 결과 스키마의 일관성 검증을 구현 영향 파일에 추가했다. 문서만 변경했으며 코드 구현은 아직 진행하지 않았다.
+- 2026-10-31: 사용자가 실제 AI API 계약·예시는 아직 없다고 확인했다. `docs/SPEC/SPEC-002.md`에 공개 API·기존 서비스 호출·오류·영향 파일을 초안으로 작성하고 외부 AI 경로·형식·분류 매핑과 파일·시간 제한은 미확정으로 표시했다. 실제 AI 연동을 검증한 것으로 처리하지 않는다.
+- 2026-10-31: 사용자 요청인 해커톤 영상 시연·단순화를 기준으로 PRD-002를 정리했다. 통화는 AI 호출 전 사건을 확정하고 같은 요청에서 짧은 녹음의 분석 결과·실패를 반환한다. 기존 JWT·대상 가족 하나의 부모 권한과 사건 서비스를 재사용한다.
+- 2026-10-31: PRD-002의 통화 이력·caller_hash, 별도 기기 인증, 비동기 worker·큐·상태 조회·자동 재시도·복구는 후속으로 둔다. 문자는 자녀 사칭 사건의 가족 확인·알림 요청 저장까지 연결하고, 가족 확인 알림 자동 발송은 별도 후속이다. 이번 변경은 문서뿐이며 실제 AI 계약·시연 파일 제한값과 코드 구현은 미완료다.
 - 2026-10-31: PRD-005는 정상 접수한 모든 통화를 사건으로 저장하고, 분석 결과가 위험·의심인 사건만 자녀에게 알린다. 정상 결과는 대응 불필요로 두고 분석 실패를 안전으로 취급하지 않는다.
 - 2026-10-31: 해커톤 최소 범위는 사건 생성·분석 상태/결과 저장·자녀 알림이다. 조회·공개 필드·대응 변경 API는 후속이며 멱등성 키·재분석·자동 재시도는 TODO로 둔다. `docs/SPEC/SPEC-005.md`에 설계와 영향 파일을 작성하고 이후 사용자 구현 승인에 따라 최소 구현을 완료했다.
 - 2026-10-31: 사용자 지시에 따라 FCM 등록 토큰 대신 FID로 전환했다. API는 `/users/me/push-registrations`, 입력은 `fid`·`previous_fid`, DB는 `PushRegistration.fid`, 발송은 `Message(fid=...)`를 사용한다.
@@ -72,6 +82,7 @@ Last updated: 2026-10-31 KST
 
 ## In Progress
 
+- PRD-002 1차 백엔드는 구현·자동 검증을 완료했다. 실제 AI 계약·시연 녹음·제한값과 실제 AI·기기 연동 검증은 남아 있다.
 - PRD-004 독립 서버 기능을 구현하고 `docs/SPEC/SPEC-004.md`에 결과를 반영했다. 실제 FCM·Android 수신 검증은 남아 있다.
 - 가족 확인 서버 범위의 구현 1~3단계는 완료 상태를 유지한다.
 
@@ -114,12 +125,17 @@ Last updated: 2026-10-31 KST
 
 ## Next Steps
 
-1. SPEC-005 최소 통화 사건 구현 검토
-2. PRD-002 연결 시 실제 AI 결과 매핑·접수 대상 가족 계약 확정
-3. 실제 AI 계약·Firebase 테스트 기기 발송·Android 수신 검증은 연결 단계에서 진행. 앱 설치 연관 분석은 진행하지 않는다.
+1. 실제 AI 계약과 시연 녹음이 준비되면 외부 AI 호출·응답 매핑·파일 및 시간 제한 확정 후 연결
+2. 실제 AI 계약에 따른 허용값·입력 제한·시간 초과 처리 검증
+3. 실제 AI와 시연 입력을 검증하고, Firebase 테스트 기기 발송·Android 수신은 별도 연동 검증. 앱 설치 연관 분석은 진행하지 않는다.
 
 ## Changed Files
 
+- 2026-10-31 PRD-002 1차 구현: `app/core/ai.py`, `app/schemas/analysis.py`, `app/services/analysis.py`, `app/api/v1/analysis.py` 신규, 기존 사건 결과 스키마·API dependency·router 보완, `tests/test_analysis.py` 신규와 OpenAPI 테스트 갱신, SPEC-002·진행 문서. DB 모델·마이그레이션·의존성·기존 DB는 변경하지 않았다.
+
+- 2026-10-31 설계 검토 보완: `docs/PRD/PRD-002.md`, `docs/SPEC/SPEC-002.md`, `docs/PROGRESS.md`. AI 미설정·파일 읽기 위치·분류와 판정 일관성 규칙 및 검증 계획을 반영했다. 코드·DB·의존성은 변경하지 않았다.
+- 2026-10-31 SPEC-002 초안: `docs/SPEC/SPEC-002.md`, `docs/PROGRESS.md`. 백엔드 공개 API와 기존 서비스 연결만 설계했으며 외부 AI 계약·제한값은 미확정이다. 코드 구현·테스트 실행은 하지 않았다.
+- 2026-10-31 PRD-002 검토 후 범위 조정: `docs/PRD/PRD-002.md`, `docs/PROGRESS.md`. 영상 시연 최소 범위와 후속 항목만 정리했으며 코드·DB·의존성은 변경하지 않았다.
 - 2026-10-31 PRD-004: `app/models/push_registration.py`, `app/repositories/push_registration.py`, `app/schemas/push.py`, `app/services/push_registration.py`, `app/services/push.py`, `app/core/fcm.py`, `app/api/v1/push_registrations.py`, `migrations/versions/0003_push_registrations.py`, 모델 export·API dependency·router, 신규 테스트 2개 파일·기존 OpenAPI 테스트, README·PRD-004·SPEC-004·진행 문서. PRD에는 사용자 지시대로 FID 전환을 반영했다. 기존 DB는 변경하지 않았다.
 - 이번 PRD-003 단계: `app/models/event.py`, `verification.py`, `notification.py`, `__init__.py`; `app/repositories/event.py`, `verification.py`, `notification.py`; `migrations/versions/0002_verification.py`; `tests/test_verification_storage.py`; 관련 PRD·SPEC·진행 문서
 - PRD-003 구현 2단계: `app/schemas/verification.py`, `app/services/verification.py`, `app/api/v1/verify.py`, API dependency·router, 사건·가족·확인 저장소의 필요한 조회 보완, 신규 스키마·서비스 테스트, 기존 OpenAPI 테스트
@@ -171,8 +187,8 @@ docker compose --env-file /dev/null config --quiet
 
 ## Test Status
 
-- Last passing: PR #3 FID NUL 검증 수정 기준 임시 PostgreSQL 18 전체 154개와 Ruff 검사·포맷 통과
-- 이번 실행: `TEST_DATABASE_URL`을 새 NUL 검증 테스트 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-prd004-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning`, 154 passed in 18.86s, 경고 0개
+- Last passing: PRD-005 자녀 대응 변경 구현 기준 임시 PostgreSQL 18 전체 198개와 Ruff 검사·포맷 통과
+- 이전 FID 검증 실행: `TEST_DATABASE_URL`을 새 NUL 검증 테스트 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-prd004-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning`, 154 passed in 18.86s, 경고 0개
 - SDK 메시지 직렬화의 `fid` 키와 `token` 키 부재, 레거시 `token`·`previous_token` 요청 거부를 검증했다.
 - 이전 PRD-001 검증: 전체 49개, Docker 빌드·마이그레이션·앱 실행, Compose 설정. 이번 DB 단계에서 이미지 빌드는 재실행하지 않았다.
 - Failing: 없음
@@ -200,3 +216,29 @@ docker compose --env-file /dev/null config --quiet
 - 검증한 동작: 정상 알림 제외·가족별 수신자·다른 세션에서 commit 확인 후 발송·저장 롤백·발송 예외 후 나머지 수신자 처리·자녀 없음·권한·상태 전이·입력 검증·NULL 분류 downgrade 중단.
 - 미포함: 조회·대응 변경 API, 실제 AI·Android 업로드 연결, 멱등성·재분석·자동 재시도. 기존 프로젝트 DB에는 마이그레이션을 적용하지 않았다.
 - 제한: 동일 통화 재전송 시 중복 사건·알림 가능, 종료 시 분석 정체·발송 누락 가능. 이번 최소 구현에서는 복구하지 않는다.
+
+## PRD-002 1차 백엔드 검증 (2026-10-31)
+
+- 독립 PostgreSQL 18 컨테이너에서 신규 13개 포함 전체 `181 passed in 25.59s`, DeprecationWarning 오류 처리.
+- 기본 503·부모 권한·문자 원문 없는 검증 오류·통화 선저장·분석 실패·판정 모순·파일 위치 복구 및 정리·문자 롤백을 검증했다.
+- 초기 테스트 수집의 설정 import 순서를 수정해 앱 설정을 테스트 fixture 초기화 후 불러오도록 했다.
+- 실제 AI 호출·허용 형식·크기 상한·시간 제한과 실제 FCM·Android 연동은 이번 완료 범위에 포함하지 않는다.
+
+## PRD-005 자녀 사건 조회 1차 검증 (2026-10-31)
+
+- 완료: `GET /api/v1/events?family_id=...&limit=20&offset=0`, `GET /api/v1/events/{event_id}`. 가족 CHILD 권한, 최소 5개 필드, 완료된 주의 필요 통화·자녀 사칭 문자만 공개한다.
+- 정상·분석 대기·진행·실패 통화는 직접 ID 조회도 404다. 대표 외 자녀의 조회도 허용한다. 사칭 문자의 기존 NULL 분석 상태를 보존하며, 조회로 대응 상태를 변경하지 않는다.
+- 변경: `app/api/v1/events.py`, `app/services/event_query.py`, 사건 저장소·출력 스키마, API dependency·router, `tests/test_event_queries.py` 신규와 OpenAPI 경로 검증, PRD-005·SPEC-005·진행 문서.
+- 검증: 신규 9개 포함 전체 `190 passed in 31.18s`, DeprecationWarning 오류 처리. Ruff 검사·포맷과 `git diff --check` 통과.
+- 명령: `TEST_DATABASE_URL`을 독립 PostgreSQL 18 `giantkiller-event-query-test` 컨테이너로 지정해 `uv --cache-dir /tmp/giantkiller-event-query-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning` 실행.
+- 기존 미커밋 PRD-002 변경을 보존했다. 모델·마이그레이션·의존성·`.env`와 기존 프로젝트 DB는 변경하지 않았다. 실제 AI·Firebase·Android·배포는 검증하지 않았다.
+
+
+## PRD-005 자녀 대응 상태 변경 검증 (2026-10-31)
+
+- 완료: `PATCH /api/v1/events/{event_id}/status`, JSON `status=ACKNOWLEDGED|RESOLVED`, 최소 5개 필드 응답. 조회와 동일한 공개 조건·가족 CHILD 권한을 적용한다.
+- 전이: OPEN에서 확인·직접 해결, ACKNOWLEDGED에서 해결, 동일 상태 재요청을 허용한다. RESOLVED의 역행은 409이며 행 잠금으로 동시 변경을 직렬화한다.
+- 변경: `app/services/event_status.py`, 상태 입력 스키마·저장소·API·dependency, `tests/test_event_status.py`, OpenAPI 경로 기대값, PRD-005·SPEC-005·진행 문서.
+- 검증: 독립 PostgreSQL 18에서 신규 8개 포함 전체 `198 passed in 42.01s`, DeprecationWarning 오류 처리. Ruff 검사·포맷과 diff 공백 검사 통과.
+- 명령: `TEST_DATABASE_URL`을 이번 전용 `giantkiller-event-status-test` DB로 지정해 `uv --cache-dir /tmp/giantkiller-event-query-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning` 실행.
+- 브랜치: `feature/child-event-queries`. 기존 미커밋 작업을 보존했다. 모델·마이그레이션·의존성·기존 DB·`.env`는 변경하지 않았으며 실제 기기·배포는 검증하지 않았다.
