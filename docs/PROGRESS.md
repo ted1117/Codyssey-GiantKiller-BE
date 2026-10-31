@@ -268,3 +268,7 @@ docker compose --env-file /dev/null config --quiet
 - 검증: 독립 PostgreSQL 18에서 신규 8개 포함 전체 `198 passed in 42.01s`, DeprecationWarning 오류 처리. Ruff 검사·포맷과 diff 공백 검사 통과.
 - 명령: `TEST_DATABASE_URL`을 이번 전용 `giantkiller-event-status-test` DB로 지정해 `uv --cache-dir /tmp/giantkiller-event-query-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning` 실행.
 - 브랜치: `feature/child-event-queries`. 기존 미커밋 작업을 보존했다. 모델·마이그레이션·의존성·기존 DB·`.env`는 변경하지 않았으며 실제 기기·배포는 검증하지 않았다.
+
+## FCM data 키 변경 (2026-10-31)
+
+- 결정: 실기기 발송이 `InvalidArgumentError: Invalid data payload key: message_type`로 실패해 FCM data 키를 `push_type`으로 변경했다. `message_type`은 FCM 예약 키다. 앱은 `data["push_type"]`을 읽어야 한다. 내부 `PushSend.message_type`, enum, DB 컬럼은 유지했다.

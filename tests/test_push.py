@@ -77,7 +77,8 @@ def test_message_payloads(
         assert result.success_count == 1 and result.failure_count == 0
         fids, title, body, data = client.calls[0]
         assert fids == ["private-fid"] and title and body
-        assert data["event_id"] == str(event_id) and data["message_type"] == kind.value
+        assert data["event_id"] == str(event_id) and data["push_type"] == kind.value
+        assert "message_type" not in data
         assert all(isinstance(value, str) for value in data.values())
         assert ("verification_id" in data) == (verification_id is not None)
         assert ("actions" in data) == (kind == PushMessageType.VERIFY_REQUEST)
@@ -88,6 +89,39 @@ def test_message_payloads(
         if kind == PushMessageType.VERIFY_DENIED:
             assert "사칭 확정" not in title + body
         assert "private-fid" not in json.dumps(data)
+
+    runner.run(scenario())
+
+
+FCM_RESERVED_KEYS = {"message_type", "from", "notification", "collapse_key"}
+
+
+@pytest.mark.parametrize("kind", list(PushMessageType))
+def test_data_keys_avoid_fcm_reserved(
+    kind: PushMessageType,
+    engine: AsyncEngine,
+    session: AsyncSession,
+    runner: asyncio.Runner,
+) -> None:
+    """FCM data 키가 예약 키와 겹치지 않는지 모든 유형에서 확인합니다."""
+
+    async def scenario() -> None:
+        user = await add_user(session)
+        await PushRegistrationRepository(session).upsert(user.id, "private-fid")
+        await session.commit()
+        client = FakeFCM()
+        verification_id = uuid4() if kind.value.startswith("VERIFY_") else None
+        await PushService(async_sessionmaker(engine), client).send(
+            PushSend(
+                user_id=user.id,
+                event_id=uuid4(),
+                message_type=kind,
+                verification_id=verification_id,
+            )
+        )
+        data = client.calls[0][3]
+        assert not FCM_RESERVED_KEYS & set(data)
+        assert not any(key.startswith(("google.", "gcm.")) for key in data)
 
     runner.run(scenario())
 
