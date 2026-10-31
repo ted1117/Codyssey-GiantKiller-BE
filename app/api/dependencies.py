@@ -65,6 +65,8 @@ def get_ai_client(settings: SettingsDep) -> AIClient:
         model=settings.ai_model,
         timeout=settings.ai_timeout_seconds,
         stt_model=settings.stt_model,
+        stt_device=settings.stt_device,
+        stt_compute_type=settings.stt_compute_type,
     )
 
 

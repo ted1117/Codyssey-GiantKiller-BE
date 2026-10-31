@@ -35,10 +35,12 @@ async def expire_verifications() -> None:
         await asyncio.sleep(30)
 
 
-async def warm_up_stt(name: str) -> None:
+async def warm_up_stt(
+    name: str, device: str = "cpu", compute_type: str = "int8"
+) -> None:
     """음성 인식 모델을 미리 불러오고 실패해도 서버는 유지합니다."""
     try:
-        await asyncio.to_thread(load_stt_model, name)
+        await asyncio.to_thread(load_stt_model, name, device, compute_type)
     except Exception as error:
         logger.error("stt_warmup_failed error_type=%s", type(error).__name__)
 
@@ -56,7 +58,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings = get_settings()
         if settings.ai_api_key:
             warmup_task = asyncio.create_task(
-                warm_up_stt(settings.stt_model), name="stt-warmup"
+                warm_up_stt(
+                    settings.stt_model,
+                    settings.stt_device,
+                    settings.stt_compute_type,
+                ),
+                name="stt-warmup",
             )
         yield
     finally:

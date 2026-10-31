@@ -269,6 +269,10 @@ docker compose --env-file /dev/null config --quiet
 - 명령: `TEST_DATABASE_URL`을 이번 전용 `giantkiller-event-status-test` DB로 지정해 `uv --cache-dir /tmp/giantkiller-event-query-uv run --no-sync pytest -q --tb=short -W error::DeprecationWarning` 실행.
 - 브랜치: `feature/child-event-queries`. 기존 미커밋 작업을 보존했다. 모델·마이그레이션·의존성·기존 DB·`.env`는 변경하지 않았으며 실제 기기·배포는 검증하지 않았다.
 
+## GPU 서버 이전 준비 (2026-10-31)
+
+- GPU 서버 이전 준비 — STT 장치·정밀도 설정, 선택적 gpu 의존성, 기본값은 기존 CPU 서버와 동일.
+
 ## FCM data 키 변경 (2026-10-31)
 
 - 결정: 실기기 발송이 `InvalidArgumentError: Invalid data payload key: message_type`로 실패해 FCM data 키를 `push_type`으로 변경했다. `message_type`은 FCM 예약 키다. 앱은 `data["push_type"]`을 읽어야 한다. 내부 `PushSend.message_type`, enum, DB 컬럼은 유지했다.

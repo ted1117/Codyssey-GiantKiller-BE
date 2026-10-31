@@ -131,3 +131,35 @@ API 재기동 실패 시 자동 롤백하지 않는다. `giantkiller-deploy.log`
 `giantkiller_postgres_data` 볼륨을 유지한다. `docker compose down -v`는 데이터를 삭제한다.
 기존에 다른 Compose 프로젝트 이름으로 운영하던 DB가 있으면 이 구성은 별도 볼륨을 만들므로
 먼저 실제 볼륨과 이전 계획을 확인한다. 운영 DB를 자동으로 이전하지 않는다.
+
+## GPU 서버
+
+NVIDIA GPU 서버(L4, 드라이버 580)는 같은 Compose 구성을 쓰고 GPU 설정만 override 파일로 추가한다.
+기본 이미지와 기본값(CPU, int8, small)은 바뀌지 않는다.
+
+1. Docker와 NVIDIA Container Toolkit을 설치한다.
+2. `/etc/giantkiller/compose.override.yaml`을 만든다.
+
+```yaml
+services:
+  api:
+    build:
+      args:
+        INSTALL_GPU: "1"
+    environment:
+      STT_DEVICE: cuda
+      STT_COMPUTE_TYPE: float16
+      STT_MODEL: large-v3
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - /etc/giantkiller/firebase-admin.json:/run/secrets/firebase-admin.json:ro
+```
+
+`large-v3` 모델(약 3GB)은 첫 기동 때 한 번 내려받아 `stt_cache` 볼륨에 보관한다.

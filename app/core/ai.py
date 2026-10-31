@@ -26,7 +26,7 @@ HIGH_CONFIDENCE = 0.8
 MAX_INPUT_CHARS = 4000
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.S)
-_stt_models: dict[str, Any] = {}
+_stt_models: dict[tuple[str, str, str], Any] = {}
 _stt_lock = threading.Lock()
 
 
@@ -50,23 +50,28 @@ class _Verdict(BaseModel):
         return value
 
 
-def _load(name: str) -> Any:
+def _load(name: str, device: str, compute_type: str) -> Any:
+    key = (name, device, compute_type)
     with _stt_lock:
-        if name not in _stt_models:
+        if key not in _stt_models:
             from faster_whisper import WhisperModel
 
-            _stt_models[name] = WhisperModel(name, device="cpu", compute_type="int8")
-        return _stt_models[name]
+            _stt_models[key] = WhisperModel(
+                name, device=device, compute_type=compute_type
+            )
+        return _stt_models[key]
 
 
-def load_stt_model(name: str) -> None:
-    """Whisper 모델을 프로세스에서 한 번만 CPU int8로 미리 불러옵니다."""
-    _load(name)
+def load_stt_model(name: str, device: str = "cpu", compute_type: str = "int8") -> None:
+    """Whisper 모델을 장치·정밀도별로 프로세스에서 한 번만 미리 불러옵니다."""
+    _load(name, device, compute_type)
 
 
-def _transcribe(name: str, file: BinaryIO) -> str:
+def _transcribe(
+    name: str, file: BinaryIO, device: str = "cpu", compute_type: str = "int8"
+) -> str:
     """음성 파일을 한국어 전사본으로 변환합니다."""
-    segments, _ = _load(name).transcribe(file, language="ko")
+    segments, _ = _load(name, device, compute_type).transcribe(file, language="ko")
     return "\n".join(segment.text.strip() for segment in segments)
 
 
@@ -81,6 +86,8 @@ class AIClient:
         model: str = "gpt-5.4",
         timeout: float = 30,
         stt_model: str = "small",
+        stt_device: str = "cpu",
+        stt_compute_type: str = "int8",
         transport: httpx.AsyncBaseTransport | None = None,
         transcribe: Callable[[BinaryIO], str] | None = None,
     ) -> None:
@@ -91,7 +98,9 @@ class AIClient:
         self.model = model
         self.timeout = timeout
         self.transport = transport
-        self.transcribe = transcribe or (lambda file: _transcribe(stt_model, file))
+        self.transcribe = transcribe or (
+            lambda file: _transcribe(stt_model, file, stt_device, stt_compute_type)
+        )
 
     async def _classify(self, text: str) -> _Verdict:
         """게이트웨이에 한 번 요청해 3분류 판정을 검증합니다."""
