@@ -11,7 +11,9 @@ log() {
   printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"
 }
 
-exec 9>"${XDG_RUNTIME_DIR:-/tmp}/giantkiller-deploy.lock"
+# cron과 SSH 수동 실행이 같은 잠금을 쓰도록 실행 환경과 무관한 저장소 내부 경로에 둔다.
+lock_file="$(git rev-parse --absolute-git-dir)/giantkiller-deploy.lock"
+exec 9>"$lock_file"
 flock -n 9 || exit 0
 
 STATE_FILE="${GIANTKILLER_DEPLOY_STATE:-$HOME/.giantkiller-deployed}"

@@ -99,7 +99,10 @@ bash deploy/auto-deploy.sh --force
 - 자동 배포 중지: `crontab -e`에서 해당 줄을 주석 처리한다.
 - 실패한 커밋은 새 커밋이 올라오거나 `--force`를 쓰기 전에는 다시 시도하지 않는다.
   마지막으로 시도한 커밋은 `~/.giantkiller-deployed`에 기록한다.
-- 같은 시각에는 한 번에 하나만 실행한다(`flock`). 로그 로테이션은 설정하지 않았으므로 파일이 커지면 직접 정리한다.
+- 같은 시각에는 한 번에 하나만 실행한다(`flock`). 잠금 파일은 `.git/giantkiller-deploy.lock`이며 cron과 수동 실행이 공유한다.
+- 수동 배포는 반드시 `deploy/auto-deploy.sh --force`로 실행한다. `bash deploy/deploy.sh`를 직접 실행하면 잠금을 거치지 않으므로 cron이 켜져 있는 동안에는 쓰지 않는다.
+  `deploy.sh`가 잠금을 직접 잡지 않는 것은 의도다. `auto-deploy.sh`가 잠금을 쥔 채 `deploy.sh`를 실행하므로 안에서 다시 잡으면 교착된다.
+- 로그 로테이션은 설정하지 않았으므로 파일이 커지면 직접 정리한다.
 
 배포 순서(`deploy/deploy.sh`)는 Compose 설정 검증 → 서버에서 API 이미지 빌드 → DB 기동 확인 →
 `alembic upgrade head` → API 재생성 → `/health` 상태 확인이다.
