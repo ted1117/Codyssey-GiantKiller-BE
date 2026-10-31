@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 
 from app.api.dependencies import EventQueryServiceDep, EventStatusServiceDep
 from app.core.auth import CurrentUser
-from app.schemas.event import EventRead, EventStatusUpdate
+from app.schemas.event import EventDetailRead, EventRead, EventStatusUpdate
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -22,11 +22,11 @@ async def list_events(
     return await service.list_by_family(family_id, user.id, limit, offset)
 
 
-@router.get("/{event_id}", response_model=EventRead, status_code=200)
+@router.get("/{event_id}", response_model=EventDetailRead, status_code=200)
 async def get_event(
     event_id: UUID, user: CurrentUser, service: EventQueryServiceDep
-) -> EventRead:
-    """가족 자녀에게 사건의 최소 상세 정보를 반환합니다."""
+) -> EventDetailRead:
+    """가족 자녀에게 사건 상세와 통화 지시 유형을 반환합니다."""
     return await service.get_detail(event_id, user.id)
 
 

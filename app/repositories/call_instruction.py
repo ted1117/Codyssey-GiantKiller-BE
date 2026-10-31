@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.call_instruction import CallInstruction
@@ -24,3 +25,12 @@ class CallInstructionRepository:
             ]
         )
         await self.session.flush()
+
+    async def list_by_event(self, event_id: UUID) -> list[CallInstruction]:
+        """사건의 지시를 유형·ID 순서로 조회합니다."""
+        result = await self.session.scalars(
+            select(CallInstruction)
+            .where(CallInstruction.event_id == event_id)
+            .order_by(CallInstruction.instruction_type, CallInstruction.id)
+        )
+        return list(result)

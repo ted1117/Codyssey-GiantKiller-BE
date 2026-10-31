@@ -293,3 +293,16 @@ PENDING → PROCESSING → COMPLETED
 - `tests/test_event_status.py`는 전이 6종, 권한·입력·숨김 및 DB 불변, 기존 사칭 문자의 NULL 분석 상태 보존, 동시 변경을 검증한다. OpenAPI 경로 기대값을 추가한다.
 
 검증 결과: 독립 PostgreSQL 18에서 신규 8개 포함 전체 `198 passed in 42.01s`. Ruff 검사·포맷과 diff 공백 검사 통과. 기존 프로젝트 DB·실제 기기·배포에는 적용하지 않았다.
+
+## 13. 자녀 조회 공개 필드 확대 (2026-10-31)
+
+사용자 승인으로 PRD-005 6.0.2를 구현했다. 이전 절의 5개 필드 응답보다 이 절을 우선한다.
+
+- `EventRead`: `id`, `event_type`, `classification`, `risk_level`, `summary`, `analysis_status`, `status`, `occurred_at` 8개 필드. NULL은 `null`로 반환한다. 목록과 PATCH 응답이 사용한다.
+- `EventInstructionRead`: `instruction_type`만 가진다. `description`은 모델에 두지 않아 어떤 응답에도 나오지 않는다.
+- `EventDetailRead(EventRead)`: `instructions: list[EventInstructionRead]`를 추가한다. 상세 응답만 사용하며 지시가 없으면 빈 목록이다.
+- `CallInstructionRepository.list_by_event(event_id)`: `select()`로 사건의 지시를 `instruction_type, id` 순으로 조회한다. 생성 시각 컬럼이 없어 결정적 정렬을 위해 ID를 보조 키로 쓴다.
+- `EventQueryService.get_detail`: 기존 순서(숨김·없는 사건 404, CHILD 권한 확인)를 유지한 뒤 지시를 조회한다. 목록은 지시를 조회하지 않는다. `EventStatusService`는 `EventRead`를 그대로 사용해 변경이 없다.
+- 모델·마이그레이션·의존성·`.env`는 변경하지 않는다.
+
+검증 결과: 독립 PostgreSQL 18에서 신규 1개 포함 전체 `207 passed`, DeprecationWarning 오류 처리. CALL 지시 2건의 유형 정렬과 설명 비노출, ALERT 빈 지시, NULL 분류·위험도, 목록의 `instructions` 부재, PATCH 8개 필드를 검증한다. Ruff 검사·포맷과 diff 공백 검사 통과.
