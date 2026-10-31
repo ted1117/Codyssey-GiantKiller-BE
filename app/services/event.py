@@ -10,6 +10,7 @@ from app.models.family import FamilyRole
 from app.repositories.call_instruction import CallInstructionRepository
 from app.repositories.event import SecurityEventRepository
 from app.repositories.family import FamilyMemberRepository
+from app.schemas.analysis import AlertAnalysisResult
 from app.schemas.event import CallAnalysisResult
 from app.schemas.push import PushMessageType, PushSend
 from app.services.family import FamilyService
@@ -106,6 +107,51 @@ class EventService:
                     user_id,
                     type(error).__name__,
                 )
+
+    async def create_alert(
+        self,
+        family_id: UUID,
+        parent_member_id: UUID,
+        occurred_at: datetime,
+        result: AlertAnalysisResult,
+    ) -> UUID:
+        """주의가 필요한 비사칭 문자를 사건으로 확정한 뒤 자녀에게 알립니다."""
+        async with transaction(self.session):
+            event = await self.events.create(
+                family_id,
+                parent_member_id,
+                "ALERT",
+                result.classification,
+                occurred_at.astimezone(UTC),
+                risk_level=result.risk_level,
+                summary=result.summary,
+                requires_attention=True,
+                analysis_status=AnalysisStatus.COMPLETED,
+            )
+            event_id = event.id
+            targets = [
+                m.user_id
+                for m in await self.members.list_by_family(family_id)
+                if m.role == FamilyRole.CHILD
+            ]
+        logger.info("alert_event_created event_id=%s", event_id)
+        for user_id in targets:
+            try:
+                await self.push.send(
+                    PushSend(
+                        user_id=user_id,
+                        event_id=event_id,
+                        message_type=PushMessageType.RISK_WARNING,
+                    )
+                )
+            except Exception as error:
+                logger.error(
+                    "alert_push_failed event_id=%s user_id=%s code=%s",
+                    event_id,
+                    user_id,
+                    type(error).__name__,
+                )
+        return event_id
 
     async def fail_analysis(self, event_id: UUID, error_code: str) -> None:
         """AI 호출·검증을 담당하는 호출부가 분석 실패를 기록합니다."""

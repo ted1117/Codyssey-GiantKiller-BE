@@ -89,7 +89,8 @@ AI 예외 처리 범위는 AI 호출·결과 검증에 한정한다. DB 저장 �
 2. AI 응답을 `AlertAnalysisResult`로 검증·변환한다. 실패하면 사건이나 가족 확인 요청을 생성하지 않고 오류를 반환한다.
 3. `classification=CHILD_IMPERSONATION`이면 1단계에서 검증한 부모 멤버 ID로 `SecurityEventRepository.create()`를 호출한다. 사건 유형은 `ALERT`, 초기 대응 상태는 `OPEN`이다.
 4. 같은 세션에서 `VerificationService.create(event_id)`를 호출한다. 이 메서드의 기존 트랜잭션으로 사건·확인 요청·대상·알림 요청을 함께 commit하고, 생성 실패 시 함께 rollback한다.
-5. 분석 결과와 생성된 ID를 반환한다. 사칭 이외 결과는 사건을 만들지 않는다.
+5. 사칭이 아니고 `requires_attention=true`이면 `EventService.create_alert()`가 한 트랜잭션에서 `ALERT` 사건(`requires_attention=true`, `analysis_status=COMPLETED`, 상태 `OPEN`)을 저장하고 가족의 `CHILD` 사용자 ID를 수집한다. commit 후 자녀별로 `RISK_WARNING`(`event_id`만, `verification_id` 없음)을 한 건씩 발송하며 실패는 오류 코드만 로그에 남기고 결과를 바꾸지 않는다. 부모에게는 보내지 않는다.
+6. 분석 결과와 생성된 ID를 반환한다. 위험 문자 사건은 `verification_id=null`이다. `requires_attention=false`인 사칭 이외 결과는 사건·알림 없이 결과만 반환한다.
 
 문자 경로에서 사건은 기존 저장소의 flush 후 확인 생성 서비스에서 함께 확정한다. 확인 생성 전에 사건만 따로 commit하지 않는다.
 가족 확인의 대상 선정·10분 만료·응답 집계는 기존 서비스를 그대로 사용한다.
@@ -183,3 +184,12 @@ HTTP 클라이언트는 현재 테스트에서 사용하는 `httpx`를 후보로
 - 독립 PostgreSQL 18에서 신규 13개 포함 전체 `181 passed in 25.59s`. DeprecationWarning을 오류로 처리했다.
 - 파일은 청크 단위로 읽어 빈 파일을 거부하고 처음으로 되돌린다. 허용 형식·크기 상한·AI 시간 제한은 실제 계약과 시연 파일이 없으므로 아직 적용하지 않았다.
 - 실제 HTTP 호출·분류 매핑·STT 및 FCM·Android 수신은 미구현 또는 미검증이다. PRD-002 전체 완료로 처리하지 않는다.
+
+## 10. 위험 문자 사건화 (2026-10-31)
+
+사용자 승인으로 PRD-002 5.2의 비사칭 위험 문자 사건화를 구현했다. 사칭 경로는 변경하지 않았다.
+
+- `SecurityEventRepository.create()`에 키워드 전용 `requires_attention`·`analysis_status`(기본 None)를 추가했다.
+- `EventService.create_alert()`와 `AnalysisService.check_alert()` 분기를 추가했다. 문자 원문·요약·예외 문구는 로그에 남기지 않는다.
+- 자녀 공개 조건은 SPEC-005 14절을 따른다. 모델·마이그레이션·의존성은 변경하지 않았다.
+- 검증: 위험 문자 사건 저장값, 확인·알림 요청 0건, 자녀별 `RISK_WARNING` 발송, 발송 실패 시 사건·200 유지와 로그 비노출. 독립 PostgreSQL 18 전체 `212 passed`, Ruff 통과.

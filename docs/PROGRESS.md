@@ -11,12 +11,13 @@ Last updated: 2026-10-31 KST
 ## Current Status
 
 - Status: PRD-002 1차 및 PRD-005 자녀 사건 조회·대응 변경 구현·자동 검증 완료. 실제 AI·입력 제한·기기 연동은 미완료
-- Current focus: 자녀 사건 조회 공개 필드 확대 완료, 독립 PostgreSQL 전체 207개 테스트 통과. 가족 확인 알림 FCM 발송 연결 완료. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
+- Current focus: 위험 문자 사건화·자녀 공개 완료, 독립 PostgreSQL 전체 212개 테스트 통과. 가족 확인 알림 FCM 발송 연결 완료. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
 - Branch: `feature/child-event-queries` (PRD-002 1차·자녀 조회·대응 변경 포함)
 - Related issue/PR: 없음
 
 ## Decisions
 
+- 2026-10-31: 사용자 승인으로 사칭 이외 위험 문자(`requires_attention=true`)를 `ALERT` 사건(`COMPLETED`·`OPEN`)으로 저장하고 commit 후 가족 자녀에게 `RISK_WARNING`을 발송한다(PRD-002 5.2, PRD-005 6.0.3). 부모에게는 보내지 않으며 발송 실패는 사건·응답을 바꾸지 않는다. `requires_attention=false`는 결과만 반환한다. 자녀 공개 조건에 `ALERT`+`requires_attention` true 분기를 추가했고 사칭 문자 저장 경로는 변경하지 않았다.
 - 2026-10-31: 사용자 승인으로 PRD-005 자녀 조회 응답을 확대했다(PRD 6.0.2). 목록·상세·PATCH 응답에 `event_type`·`classification`·`risk_level`을 추가하고 NULL은 그대로 `null`로 반환한다. 상세만 `instructions`(지시 유형 목록)를 추가하며 `CallInstruction.description`은 통화 내용 노출 우려로 공개하지 않는다. 권한·공개 조건·정렬·페이지·가족 확인 비공개는 유지한다. DB 변경은 없다.
 
 - 2026-10-31: 사용자 승인으로 가족 확인 알림을 PRD-004 `PushService`에 연결했다. Android 앱이 없어도 서버 발송 시도까지 먼저 연결한다. 확인 요청 생성·결과 확정·만료 시 저장한 알림 요청을 commit 후 수신자별로 발송하며, 롤백·재호출은 발송하지 않고 발송 실패는 확정 결과를 바꾸지 않는다. API 테스트는 `get_push_service`를 가짜로 대체한다. 실제 FCM·기기 수신, TTL, 응답과 분리한 백그라운드 발송은 후속이다.
@@ -50,6 +51,7 @@ Last updated: 2026-10-31 KST
 
 ## Completed
 
+- [x] 위험 문자 사건화·자녀 `RISK_WARNING` 발송·자녀 조회 공개, 신규·수정 테스트 포함 전체 212개와 Ruff 통과
 - [x] 자녀 사건 조회 공개 필드 확대: 8개 필드 공통 응답, 상세 지시 유형 목록, 설명 비공개
 - [x] FastAPI Users 15.0.5와 SQLAlchemy 어댑터 7.0.0 설치
 - [x] User, Family, FamilyMember, FamilyInvitation 모델
@@ -137,6 +139,7 @@ Last updated: 2026-10-31 KST
 
 ## Changed Files
 
+- 2026-10-31 위험 문자 사건화: `app/repositories/event.py`, `app/services/event.py`, `app/services/analysis.py`, `tests/test_analysis.py`, `tests/test_event_queries.py`, PRD-002·PRD-005·SPEC-002·SPEC-005·진행 문서. DB 모델·마이그레이션·의존성은 변경하지 않았다.
 - 2026-10-31 자녀 조회 공개 필드 확대: `app/schemas/event.py`, `app/repositories/call_instruction.py`, `app/services/event_query.py`, `app/api/v1/events.py`, `tests/test_event_queries.py`, `tests/test_event_status.py`, PRD-005·SPEC-005·진행 문서. DB 모델·마이그레이션·의존성은 변경하지 않았다.
 
 - 2026-10-31 가족 확인 FCM 연결: `app/services/verification.py`, `app/api/dependencies.py`, `app/services/analysis.py`, `app/main.py`, `tests/conftest.py`, 신규 `tests/test_verification_push.py`, PRD-002·PRD-004·SPEC-003·SPEC-004·진행 문서. DB 모델·마이그레이션·의존성은 변경하지 않았다.

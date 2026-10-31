@@ -123,6 +123,31 @@ def test_list_detail_and_pagination(
     runner.run(scenario())
 
 
+def test_risk_alert_visible(
+    client: AsyncClient, session: AsyncSession, runner: asyncio.Runner
+) -> None:
+    """주의가 필요한 비사칭 문자 사건은 목록과 상세에서 자녀에게 공개합니다."""
+
+    async def scenario() -> None:
+        fid, child, _, parent = await seed_family(client, session)
+        row = event(
+            fid,
+            parent,
+            event_type="ALERT",
+            classification="FRAUD",
+            risk_level="HIGH",
+        )
+        session.add(row)
+        await session.commit()
+        listing = await client.get(PREFIX, headers=child, params={"family_id": fid})
+        assert [item["id"] for item in listing.json()] == [str(row.id)]
+        assert listing.json()[0]["classification"] == "FRAUD"
+        detail = await client.get(f"{PREFIX}/{row.id}", headers=child)
+        assert detail.status_code == 200 and detail.json()["event_type"] == "ALERT"
+
+    runner.run(scenario())
+
+
 def test_detail_instructions_hide_description(
     client: AsyncClient, session: AsyncSession, runner: asyncio.Runner
 ) -> None:
@@ -179,6 +204,13 @@ def test_detail_instructions_hide_description(
         {"analysis_status": "FAILED", "requires_attention": None},
         {"analysis_status": None, "requires_attention": None},
         {"event_type": "ALERT", "classification": "SAFE", "requires_attention": None},
+        {"event_type": "ALERT", "classification": "FRAUD", "requires_attention": None},
+        {
+            "event_type": "ALERT",
+            "classification": "FRAUD",
+            "requires_attention": False,
+            "status": "NOT_REQUIRED",
+        },
     ],
 )
 def test_hidden_events(

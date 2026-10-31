@@ -26,6 +26,8 @@ class SecurityEventRepository:
         *,
         risk_level: str | None = None,
         summary: str | None = None,
+        requires_attention: bool | None = None,
+        analysis_status: AnalysisStatus | None = None,
     ) -> SecurityEvent:
         """사건을 저장하며 가족·역할과 분류 정책은 호출자가 검증합니다."""
         event = SecurityEvent(
@@ -36,6 +38,8 @@ class SecurityEventRepository:
             occurred_at=occurred_at,
             risk_level=risk_level,
             summary=summary,
+            requires_attention=requires_attention,
+            analysis_status=analysis_status,
         )
         self.session.add(event)
         await self.session.flush()
@@ -55,6 +59,7 @@ class SecurityEventRepository:
     @staticmethod
     def _visible() -> ColumnElement[bool]:
         # 사칭 문자는 기존 저장 경로에서 분석 상태·판정값을 채우지 않는다.
+        # 그 외 문자는 주의가 필요한 판정(requires_attention)일 때만 공개한다.
         return or_(
             and_(
                 SecurityEvent.event_type == "CALL",
@@ -64,6 +69,10 @@ class SecurityEventRepository:
             and_(
                 SecurityEvent.event_type == "ALERT",
                 SecurityEvent.classification == "CHILD_IMPERSONATION",
+            ),
+            and_(
+                SecurityEvent.event_type == "ALERT",
+                SecurityEvent.requires_attention.is_(True),
             ),
         )
 
