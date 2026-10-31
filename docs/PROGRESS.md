@@ -11,11 +11,13 @@ Last updated: 2026-10-31 KST
 ## Current Status
 
 - Status: PRD-002 1차 및 PRD-005 자녀 사건 조회·대응 변경 구현·자동 검증 완료. 실제 AI·입력 제한·기기 연동은 미완료
-- Current focus: 자녀 사건 조회·대응 변경 완료, 독립 PostgreSQL 전체 198개 테스트 통과. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
+- Current focus: 가족 확인 알림 FCM 발송 연결 완료, 독립 PostgreSQL 전체 206개 테스트 통과. 기본 AI 미설정 503, 실제 AI 계약·파일 제한·기기 연동은 후속
 - Branch: `feature/child-event-queries` (PRD-002 1차·자녀 조회·대응 변경 포함)
 - Related issue/PR: 없음
 
 ## Decisions
+
+- 2026-10-31: 사용자 승인으로 가족 확인 알림을 PRD-004 `PushService`에 연결했다. Android 앱이 없어도 서버 발송 시도까지 먼저 연결한다. 확인 요청 생성·결과 확정·만료 시 저장한 알림 요청을 commit 후 수신자별로 발송하며, 롤백·재호출은 발송하지 않고 발송 실패는 확정 결과를 바꾸지 않는다. API 테스트는 `get_push_service`를 가짜로 대체한다. 실제 FCM·기기 수신, TTL, 응답과 분리한 백그라운드 발송은 후속이다.
 
 - 2026-10-31: 자녀 사건 대응 상태 변경을 추가 승인받아 `PATCH /api/v1/events/{event_id}/status`를 구현했다. 조회와 같은 공개 조건·CHILD 권한을 적용하고 확인·직접 해결·같은 상태 재요청을 허용한다. 완료 상태의 역행은 409로 거부하며 사건 행 잠금으로 동시 변경을 직렬화한다. 분석·가족 확인·알림은 변경하지 않는다.
 
@@ -79,6 +81,7 @@ Last updated: 2026-10-31 KST
 - [x] PRD-004 최소 FID 모델·저장소·마이그레이션과 인증된 등록·교체·연결 해제 API
 - [x] 독립 FCM 발송, 고정 문구·ID·응답 액션, 부분 실패·무효 FID 정리·원문 없는 로그
 - [x] 신규 테스트 22개, 새 PostgreSQL 18에서 전체 149개와 Ruff 검사·포맷 통과
+- [x] 가족 확인 생성·확정·만료 알림의 commit 후 FCM 발송 연결, 신규 테스트 8개, 새 PostgreSQL 18에서 전체 206개와 Ruff 통과
 
 ## In Progress
 
@@ -130,6 +133,8 @@ Last updated: 2026-10-31 KST
 3. 실제 AI와 시연 입력을 검증하고, Firebase 테스트 기기 발송·Android 수신은 별도 연동 검증. 앱 설치 연관 분석은 진행하지 않는다.
 
 ## Changed Files
+
+- 2026-10-31 가족 확인 FCM 연결: `app/services/verification.py`, `app/api/dependencies.py`, `app/services/analysis.py`, `app/main.py`, `tests/conftest.py`, 신규 `tests/test_verification_push.py`, PRD-002·PRD-004·SPEC-003·SPEC-004·진행 문서. DB 모델·마이그레이션·의존성은 변경하지 않았다.
 
 - 2026-10-31 PRD-002 1차 구현: `app/core/ai.py`, `app/schemas/analysis.py`, `app/services/analysis.py`, `app/api/v1/analysis.py` 신규, 기존 사건 결과 스키마·API dependency·router 보완, `tests/test_analysis.py` 신규와 OpenAPI 테스트 갱신, SPEC-002·진행 문서. DB 모델·마이그레이션·의존성·기존 DB는 변경하지 않았다.
 

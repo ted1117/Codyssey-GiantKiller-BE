@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException
 from app.api.router import router
 from app.core.database import engine, session_factory
 from app.core.exceptions import ServiceError
+from app.services.push import PushService
 from app.services.verification import VerificationService
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,9 @@ async def expire_verifications() -> None:
     while True:
         try:
             async with session_factory() as session:
-                await VerificationService(session).expire_due()
+                await VerificationService(
+                    session, PushService(session_factory)
+                ).expire_due()
         except Exception as error:
             logger.error(
                 "verification_expiration_failed error_type=%s", type(error).__name__

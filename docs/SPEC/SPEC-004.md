@@ -186,8 +186,9 @@ FCM 메시지 예시:
 - FID이 없거나 사용자가 비활성이면 발송 없이 건너뛰고 사유를 남긴다.
 - 여러 FID는 최대 500개씩 나눠 보낸다. 일부 실패가 다른 FID의 성공을 취소하지 않는다.
 - 애플리케이션 수준 자동 재시도·영속 발송 대기열은 만들지 않는다.
-- async 호출도 완료까지 기다리므로 향후 사건 API에 그대로 `await`하면 응답 지연이 생긴다. 사건 저장 commit 후 응답과 분리해 호출하는 연결 설계는 후속이다.
-- 현재는 호출부 자체를 연결하지 않는다. `NotificationRequest`를 조회해 자동 발송하는 작업도 시작하지 않는다.
+- async 호출도 완료까지 기다리므로 호출한 API 응답이 발송 시간만큼 늦어진다. 응답과 분리한 백그라운드 발송은 후속이다.
+- 호출부는 통화 분석 완료(`EventService`)와 가족 확인(`VerificationService`)이다. 가족 확인은 알림 요청을 저장한 트랜잭션이 commit된 뒤 같은 요청의 대상에게 수신자별로 한 번 발송을 시도한다. 롤백된 작업은 발송하지 않는다.
+- `NotificationRequest`를 다시 조회해 미발송 건을 보내는 작업은 만들지 않는다.
 - 프로세스가 발송 도중 종료되면 미발송 건을 자동 복구하지 않으며, 재호출 시 중복 발송될 수 있다.
 - async 호출을 취소해도 이미 실행 중인 worker thread의 발송은 중단을 보장하지 않는다.
 - FCM 접수 성공은 기기 수신·표시·사용자 확인 성공이 아니다.
@@ -246,6 +247,7 @@ FCM 메시지 예시:
 - 유형별 문구·문자열 데이터·사건 ID·확인 요청 ID·응답 액션과 민감 원문 제외를 확인한다.
 - 가짜 FCM 클라이언트로 전체 성공·부분 실패·FID 없음·비활성 계정·자격 증명 오류를 확인한다.
 - 서비스 호출이 없으면 기존 알림 요청이 자동 발송되지 않는지 확인한다.
+- 가족 확인 생성·응답 확정·만료에서 commit 후 수신자·유형별 발송 시도, 재호출·롤백 시 미발송, 발송 예외 시 결과 유지를 확인한다.
 - 마이그레이션과 DB 검증은 기존 DB와 분리한 테스트 PostgreSQL에서 진행한다.
 - Ruff·해당 테스트·전체 회귀 검증 결과는 10절에 기록한다.
 - 실제 Firebase 테스트 기기로 발송하고 Android의 포그라운드·백그라운드 수신 및 알림 선택을 별도 검증한다.
@@ -278,3 +280,6 @@ FID 연결 해제 실패 처리다. PRD에는 사용자가 지시한 FID 전환�
 - NUL 검증 수정 후 PUT의 `fid`·`previous_fid`와 DELETE의 `fid`가 원문 없는 422를 반환하고 기존 데이터를 보존하는 회귀 테스트 3개를 추가했다. 새 PostgreSQL 18에서 전체 `154 passed in 18.86s`, 경고 0개와 Ruff 검사·포맷 통과를 확인했다.
 - `uv run --no-sync ruff check app migrations tests`와 `uv run --no-sync ruff format --check app migrations tests`, `git diff --check`가 통과했다.
 - 실제 Firebase 호출·Android 기기 수신·기존 프로젝트 DB 마이그레이션·배포는 실행하지 않았다. `.env`는 읽거나 수정하지 않았다.
+- 2026-10-31 가족 확인 연결: `VerificationService`에 선택적 `PushService`를 주입했다. 생성 시 자녀 `VERIFY_REQUEST`·부모 `VERIFY_WAITING`(대상 없으면 `VERIFY_EXPIRED`), 확정 시 부모 `VERIFY_CONFIRMED`·`VERIFY_DENIED`·`VERIFY_EXPIRED`를 commit 후 발송한다. API는 `get_push_service` dependency, 만료 작업은 앱 세션 팩토리로 주입한다. 발송 예외는 `verification_push_failed`로 기록하고 확정 결과를 유지한다.
+- 미정: 10분 기한에 맞춘 FCM TTL, 발송 지연이 큰 경우 이미 확정된 요청의 `VERIFY_REQUEST`가 늦게 도착하는 경우의 앱 처리. 앱은 알림 선택 시 상태 조회 API로 최신 상태를 확인한다.
+- 신규 `tests/test_verification_push.py` 8개 추가, 새 PostgreSQL 18 테스트 컨테이너에서 전체 `206 passed`, Ruff 검사·포맷 통과.

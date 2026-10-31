@@ -16,8 +16,10 @@ from app.repositories.event import SecurityEventRepository
 from app.repositories.family import FamilyMemberRepository
 from app.repositories.notification import NotificationRequestRepository
 from app.repositories.verification import VerificationRepository
+from app.schemas.push import PushMessageType, PushSend
 from app.schemas.verification import VerificationRead
 from app.services.family import FamilyService
+from app.services.push import PushService
 from app.services.transaction import transaction
 
 logger = logging.getLogger(__name__)
@@ -26,14 +28,58 @@ logger = logging.getLogger(__name__)
 class VerificationService:
     """가족 확인의 권한·응답 집계·만료와 알림 요청을 함께 처리합니다."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """모든 저장소에 동일한 트랜잭션의 세션을 연결합니다."""
+    def __init__(self, session: AsyncSession, push: PushService | None = None) -> None:
+        """모든 저장소에 동일한 트랜잭션의 세션과 선택적 발송 서비스를 연결합니다.
+
+        Args:
+            session: 확인 요청·응답·알림 요청을 저장할 세션입니다.
+            push: commit 후 알림 요청을 발송할 서비스입니다. 없으면 저장만 합니다.
+        """
         self.session = session
+        self.push = push
+        self._outbox: list[PushSend] = []
         self.events = SecurityEventRepository(session)
         self.members = FamilyMemberRepository(session)
         self.verifications = VerificationRepository(session)
         self.notifications = NotificationRequestRepository(session)
         self.families = FamilyService(session)
+
+    async def _notify(
+        self,
+        event_id: UUID,
+        verification_id: UUID,
+        user_id: UUID,
+        message_type: NotificationType,
+    ) -> None:
+        await self.notifications.create(
+            event_id, verification_id, user_id, message_type
+        )
+        self._outbox.append(
+            PushSend(
+                user_id=user_id,
+                event_id=event_id,
+                verification_id=verification_id,
+                message_type=PushMessageType(message_type.value),
+            )
+        )
+
+    async def _send_outbox(self) -> None:
+        # commit된 알림 요청만 발송하며 발송 실패는 확정 결과를 바꾸지 않는다.
+        messages, self._outbox = self._outbox, []
+        if self.push is None:
+            return
+        for message in messages:
+            try:
+                await self.push.send(message)
+            except Exception as error:
+                logger.error(
+                    "verification_push_failed verification_id=%s user_id=%s "
+                    "message_type=%s code=%s",
+                    message.verification_id,
+                    message.user_id,
+                    message.message_type,
+                    type(error).__name__,
+                )
 
     async def _require_parent(
         self, family_id: UUID, parent_member_id: UUID
@@ -49,6 +95,7 @@ class VerificationService:
 
     async def create(self, event_id: UUID) -> VerificationRequest:
         """저장된 사칭 사건에 확인 요청과 대상·알림 요청을 한 번만 생성합니다."""
+        self._outbox = []
         try:
             async with transaction(self.session):
                 event = await self.events.get(event_id, for_update=True)
@@ -83,13 +130,13 @@ class VerificationService:
                     request.id, [child.id for child in children]
                 )
                 for child in children:
-                    await self.notifications.create(
+                    await self._notify(
                         event.id,
                         request.id,
                         child.user_id,
                         NotificationType.VERIFY_REQUEST,
                     )
-                await self.notifications.create(
+                await self._notify(
                     event.id,
                     request.id,
                     parent.user_id,
@@ -101,6 +148,7 @@ class VerificationService:
             logger.warning("verification_create_rejected code=%s", error.detail)
             raise
         logger.info("verification_created id=%s status=%s", request.id, request.status)
+        await self._send_outbox()
         return request
 
     async def _require_request(self, verification_id: UUID) -> VerificationRequest:
@@ -119,14 +167,13 @@ class VerificationService:
             VerificationStatus.DENIED: NotificationType.VERIFY_DENIED,
             VerificationStatus.EXPIRED: NotificationType.VERIFY_EXPIRED,
         }[status]
-        await self.notifications.create(
-            request.event_id, request.id, parent.user_id, message_type
-        )
+        await self._notify(request.event_id, request.id, parent.user_id, message_type)
 
     async def get_detail(
         self, verification_id: UUID, user_id: UUID
     ) -> VerificationRead:
         """가족 멤버에게 현재 상태를 반환하며 지난 기한은 만료로 확정합니다."""
+        self._outbox = []
         expired = False
         async with transaction(self.session):
             request = await self._require_request(verification_id)
@@ -153,12 +200,14 @@ class VerificationService:
             )
         if expired:
             logger.info("verification_expired id=%s", verification_id)
+        await self._send_outbox()
         return result
 
     async def respond(
         self, verification_id: UUID, user_id: UUID, answer: VerificationAnswer
     ) -> VerificationRead:
         """대상 자녀의 최초 응답을 기록하고 집계 결과와 알림을 함께 확정합니다."""
+        self._outbox = []
         expired = False
         async with transaction(self.session):
             request = await self._require_request(verification_id)
@@ -196,6 +245,7 @@ class VerificationService:
                     responded_count=responded_count,
                     my_response=response.response,
                 )
+        await self._send_outbox()
         # 만료 저장을 commit한 다음 오류를 반환해야 전체 변경이 롤백되지 않는다.
         if expired:
             logger.info("verification_expired_response id=%s", verification_id)
@@ -207,6 +257,7 @@ class VerificationService:
 
     async def expire_due(self) -> int:
         """기한이 지난 대기 요청과 부모 알림을 확정하고 처리 수를 반환합니다."""
+        self._outbox = []
         expired_ids = []
         async with transaction(self.session):
             verification_ids = await self.verifications.list_expired_ids(
@@ -224,4 +275,5 @@ class VerificationService:
                     expired_ids.append(verification_id)
         for verification_id in expired_ids:
             logger.info("verification_expired id=%s", verification_id)
+        await self._send_outbox()
         return len(expired_ids)
