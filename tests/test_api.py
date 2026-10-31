@@ -542,6 +542,11 @@ def test_configured_invitation_link_and_openapi(
         assert issued["invite_url"].startswith("https://app.example.com/invite/")
         paths = (await client.get("/openapi.json")).json()["paths"]
         assert set(paths) == {
+            f"{PREFIX}/events",
+            f"{PREFIX}/events/{{event_id}}",
+            f"{PREFIX}/events/{{event_id}}/status",
+            f"{PREFIX}/alerts/check",
+            f"{PREFIX}/calls/analyze",
             "/health",
             f"{PREFIX}/auth/register",
             f"{PREFIX}/auth/login",

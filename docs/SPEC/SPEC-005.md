@@ -3,7 +3,7 @@
 - 관련 요구사항: [PRD-005](../PRD/PRD-005.md)
 - 연결 계약: [PRD-002](../PRD/PRD-002.md), [SPEC-003](SPEC-003.md), [SPEC-004](SPEC-004.md)
 - 작성일: 2026-10-31 KST
-- 상태: 최소 내부 서비스 구현·자동 검증 완료. 실제 AI·Android 연결은 후속이다.
+- 상태: 최소 내부 서비스 구현·자동 검증 완료. 자녀 조회 1차 구현은 11절에 기록한다. 실제 AI·Android 연결은 후속이다.
 
 ## 1. 이번 범위
 
@@ -26,7 +26,7 @@
 
 이번 범위에서 제외한다.
 
-- 사건 목록·상세 API, 조회 권한·정상 통화의 공개 필드·목록 필터
+- 당시 사건 목록·상세 API는 제외했으며, 이후 사용자 승인으로 11절의 최소 조회 범위를 추가했다.
 - 자녀의 확인·대응 완료 변경 API. 대응 상태의 초기값·정상 결과 전이만 구현 대상이다.
 - Android 업로드 API, 오디오 보관·STT·실제 AI HTTP 호출, 분석 worker와 작업 상태 조회 API. PRD-002 연결 작업으로 둔다.
 - 알림·앱 설치 사건 생성, 통화 간 연관 분석·최근 발신자 맥락 조회
@@ -234,7 +234,7 @@ PENDING → PROCESSING → COMPLETED
 - 통화 멱등성 키·중복 사건/알림 방지
 - 재분석과 결과 변경 시 대응 상태·재알림 정책
 - 자동 재시도·프로세스 종료 후 분석/발송 복구
-- 조회 권한·내용 공개·대응 변경 API와 원본 보존 정책
+- 최소 필드 외 추가 내용 공개와 원본 보존 정책. 대응 변경 API는 이후 12절에서 구현했다.
 
 
 ## 10. 구현 결과와 검증 (2026-10-31)
@@ -247,3 +247,49 @@ PENDING → PROCESSING → COMPLETED
 - Ruff 검사·포맷 검사와 `git diff --check`를 통과했다. 기존 테스트의 메타데이터·마이그레이션·가족 확인·FID 회귀 검증도 통과했다.
 - `.env`와 기존 프로젝트 DB는 읽거나 변경하지 않았다. 마이그레이션은 테스트 DB에만 적용했다.
 - 실제 업로드·AI API·FCM 기기 수신·조회는 검증 범위가 아니다. 자녀 알림 연결 테스트는 가짜 발송 서비스를 사용하고, 기존 FCM 테스트는 가짜 클라이언트를 사용한다.
+
+## 11. 자녀 사건 조회 1차 구현 (2026-10-31)
+
+사용자가 목록·상세 구현을 승인하고 공개 필드를 요약·분석 상태·대응 상태·시각으로 제한했다. 정상 통화는 공개하지 않는다. 이전 절의 조회 제외 범위보다 이 추가 계약을 우선한다.
+
+### API·응답
+
+- `GET /api/v1/events`: Bearer JWT, 필수 `family_id: UUID`, 선택 `limit: 1~100`(기본 20), `offset >= 0`(기본 0). `EventRead[]`를 반환하며 total 집계는 제공하지 않는다.
+- `GET /api/v1/events/{event_id}`: Bearer JWT, `EventRead` 하나를 반환한다.
+- 공통 응답: `id: UUID`, `summary: str | null`, `analysis_status: str | null`, `status: str`, `occurred_at: datetime`.
+- 원문·녹음·전화번호·위험도·분류·통화 지시·가족 확인 정보는 반환하지 않는다. NULL 상태는 정상이나 완료로 보정하지 않는다.
+
+### 권한·공개 조건
+
+- 가족의 CHILD 멤버만 허용한다. 타 가족 403 `FAMILY_ACCESS_DENIED`, 부모 403 `CHILD_REQUIRED`, 미인증 401이다.
+- 목록의 없는 가족은 404 `FAMILY_NOT_FOUND`, 없는 사건과 숨긴 사건의 상세는 404 `EVENT_NOT_FOUND`다. 잘못된 UUID·페이지 값은 422다.
+- DB 조회 단계에서 공개 조건을 공통 적용한다. `CALL AND analysis_status=COMPLETED AND requires_attention=true` 또는 `ALERT AND classification=CHILD_IMPERSONATION`만 노출한다.
+- 사칭 문자는 현재 PRD-002 저장 경로가 판정값·분석 상태를 채우지 않으므로 별도 조건으로 포함한다. 정상·미분석·실패 통화는 ID 직접 조회로도 공개하지 않는다.
+- 목록은 `occurred_at DESC, created_at DESC, id DESC`로 정렬하고 공개 필터 뒤에 limit·offset을 적용한다.
+- 대응 상태는 공개 필터로 사용하지 않으며 조회로 변경하지 않는다. 향후 정상 통화 공개 정책 변경은 저장소의 공통 공개 조건에서 처리할 수 있다.
+
+### 영향 파일·검증
+
+- `app/api/v1/events.py`, `app/services/event_query.py` 신규. 기존 `EventService`는 분석·발송 기능을 그대로 유지한다.
+- `app/repositories/event.py`: 공통 공개 조건·목록·단건 조회, `app/schemas/event.py`: 최소 출력 모델 추가.
+- API dependency·통합 router, OpenAPI 경로 검증, `tests/test_event_queries.py` 추가.
+- 기존 미커밋 PRD-002 변경은 보존한다. 모델·마이그레이션·의존성·`.env`는 변경하지 않는다.
+- 검증 대상: 자녀·부모·타 가족·미인증 권한, 정상·분석 대기·진행·실패 숨김, 기존 사칭 문자의 NULL 상태 유지, 최신순·동일 시각 정렬·페이지 처리, 목록·상세 출력 일치와 조회의 상태 변경 없음.
+
+검증 결과: 독립 PostgreSQL 18에서 신규 9개 포함 전체 `190 passed in 31.18s`, DeprecationWarning 오류 처리. Ruff 검사·포맷과 diff 공백 검사를 통과했다. 실제 AI·Firebase·Android·배포 검증은 포함하지 않는다.
+
+## 12. 자녀 대응 상태 변경 추가 구현 (2026-10-31)
+
+사용자가 자녀의 확인·해결 선택 API 구현을 추가 승인했다. 이전 절의 대응 변경 제외 범위보다 이 절을 우선한다.
+
+- `PATCH /api/v1/events/{event_id}/status`, Bearer JWT, JSON `{"status":"ACKNOWLEDGED"}` 또는 `{"status":"RESOLVED"}`. 성공 200, 응답은 기존 `EventRead` 5개 필드다.
+- `EventStatusUpdate`는 허용된 두 상태만 받으며 추가 필드를 거부한다. 잘못된 상태·UUID·누락 입력은 422다.
+- 기존 공개 필터를 재사용한다. 완료된 주의 필요 통화와 자녀 사칭 문자만 변경하며 정상·미분석·실패 사건과 없는 사건은 404 `EVENT_NOT_FOUND`다.
+- 해당 가족의 CHILD만 허용한다. 미인증 401, 부모 403 `CHILD_REQUIRED`, 타 가족 403 `FAMILY_ACCESS_DENIED`다. 대표가 아닌 자녀도 허용한다.
+- 전이: OPEN에서 ACKNOWLEDGED 또는 RESOLVED, ACKNOWLEDGED에서 RESOLVED. 동일 상태 재요청은 200이며 역행 등 불가 전이는 409 `EVENT_STATUS_CONFLICT`다. OPEN·NOT_REQUIRED로의 사용자 변경은 지원하지 않는다.
+- `get_visible(..., for_update=True)`가 사건을 잠그고 최신 값을 다시 읽는다. 권한·상태 검사와 flush·commit은 하나의 서비스 트랜잭션에서 수행한다. 동시 해결·확인 요청에서도 RESOLVED를 ACKNOWLEDGED로 되돌리지 않는다.
+- 분석·판정·발생 시각·가족 확인·알림은 변경하지 않는다. commit 이후 사건·사용자 ID와 상태 전이만 로그에 남긴다.
+- `app/services/event_status.py` 신규, `app/schemas/event.py`, 사건 저장소·API·dependency 보완. 모델·DB 마이그레이션·의존성 변경은 없다.
+- `tests/test_event_status.py`는 전이 6종, 권한·입력·숨김 및 DB 불변, 기존 사칭 문자의 NULL 분석 상태 보존, 동시 변경을 검증한다. OpenAPI 경로 기대값을 추가한다.
+
+검증 결과: 독립 PostgreSQL 18에서 신규 8개 포함 전체 `198 passed in 42.01s`. Ruff 검사·포맷과 diff 공백 검사 통과. 기존 프로젝트 DB·실제 기기·배포에는 적용하지 않았다.
