@@ -230,3 +230,4 @@ pyrightconfig.json
 # AI
 AGENTS.md
 !docs/PRD/*
+.claude/*
