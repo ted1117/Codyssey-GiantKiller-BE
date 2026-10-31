@@ -8,10 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    LD_LIBRARY_PATH="/app/.venv/lib/python3.14/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.14/site-packages/nvidia/cudnn/lib"
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+ARG INSTALL_GPU=0
+RUN uv sync --locked --no-dev --no-install-project \
+    $( [ "$INSTALL_GPU" = "1" ] && echo --extra gpu )
 
 RUN useradd --create-home app \
     && mkdir -p /home/app/.cache/huggingface \

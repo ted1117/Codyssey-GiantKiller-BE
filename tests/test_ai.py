@@ -317,3 +317,39 @@ def test_audio_too_large(
         assert count == 0
 
     runner.run(scenario())
+
+
+def test_default_transcribe_uses_cpu_int8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """기본 전사는 small, cpu, int8로 모델을 불러옵니다."""
+    import app.core.ai as ai_module
+
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeModel:
+        def transcribe(self, file, language):
+            return [], None
+
+    def fake_load(name: str, device: str, compute_type: str) -> FakeModel:
+        calls.append((name, device, compute_type))
+        return FakeModel()
+
+    monkeypatch.setattr(ai_module, "_load", fake_load)
+    AIClient("key-1").transcribe(BytesIO(b""))
+    AIClient("key-1", stt_device="cuda", stt_compute_type="float16").transcribe(
+        BytesIO(b"")
+    )
+    assert calls == [("small", "cpu", "int8"), ("small", "cuda", "float16")]
+
+
+def test_get_ai_client_passes_stt_settings() -> None:
+    """설정의 STT 장치와 정밀도가 AI 클라이언트로 전달됩니다."""
+    from app.api.dependencies import get_ai_client
+    from app.core.config import Settings
+
+    base = {"postgres_password": "p", "auth_secret": "s" * 32}
+    default = Settings(_env_file=None, **base)
+    assert (default.stt_device, default.stt_compute_type) == ("cpu", "int8")
+    gpu = Settings(
+        _env_file=None, stt_device="cuda", stt_compute_type="float16", **base
+    )
+    assert get_ai_client(gpu).transcribe is not None

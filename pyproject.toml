@@ -18,6 +18,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0,<2.1",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12>=9,<10",
+]
+
 [tool.ruff]
 target-version = "py314"
 line-length = 88
