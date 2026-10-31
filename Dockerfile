@@ -13,7 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
-RUN useradd --create-home app
+RUN useradd --create-home app \
+    && mkdir -p /home/app/.cache/huggingface \
+    && chown -R app:app /home/app/.cache
 COPY --chown=app:app app ./app
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations

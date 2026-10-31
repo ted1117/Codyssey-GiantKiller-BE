@@ -22,6 +22,8 @@ from app.services.push import PushService
 from app.services.transaction import transaction
 from app.services.verification import VerificationService
 
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
 
 class AnalysisService:
     """AI 호출과 기존 사건·가족 확인 서비스를 연결합니다."""
@@ -93,6 +95,8 @@ class AnalysisService:
             size = 0
             while chunk := await file.read(65536):
                 size += len(chunk)
+                if size > MAX_AUDIO_BYTES:
+                    raise ServiceError(413, "AUDIO_TOO_LARGE")
             await file.seek(0)
             if not size:
                 raise ServiceError(422, "EMPTY_AUDIO")

@@ -3,7 +3,7 @@
 - 관련 요구사항: [PRD-002](../PRD/PRD-002.md)
 - 연결 계약: [SPEC-003](SPEC-003.md), [SPEC-005](SPEC-005.md)
 - 작성일: 2026-10-31 KST
-- 상태: 1차 백엔드 구현·자동 검증 완료. 일반 요청은 AI 미설정 503이며 실제 AI 계약·연동은 미확정
+- 상태: 실제 AI 연결 구현·자동 검증 완료(2026-10-31, 11절). `AI_API_KEY` 미설정이면 503이며 실제 게이트웨이·STT 실연동 확인은 배포 환경에서 별도 필요
 
 ## 1. 범위
 
@@ -111,20 +111,26 @@ AI 예외 처리 범위는 AI 호출·결과 검증에 한정한다. DB 저장 �
 - 사칭 분류와 `requires_attention=false`가 함께 오면 `INVALID_ANALYSIS_RESULT`로 거부한다. 통화는 기존 사건에 `FAILED`를 기록하고, 문자는 사건·가족 확인 요청을 생성하지 않는다. 위험 알림도 호출하지 않는다.
 - `AlertAnalysisResult`도 허용 필드·타입·NUL을 검증한다. 외부 AI 응답을 공개 응답으로 그대로 전달하지 않는다.
 
-AI 서버 주소·경로·인증·입력 필드·응답 JSON은 현재 미확정이다.
-녹음을 보내 한 번에 STT·분석 결과를 받는지, 여러 호출을 조합하는지도 아직 정해지지 않았다.
-백엔드 API 경로를 AI 서버 경로로 가정하거나 내부 모델을 실제 AI 응답 예시로 제시하지 않는다.
+### 4.1. 실제 계약 (2026-10-31 확정)
+
+- 별도 AI 서버 없이 백엔드가 Codyssey LLM 게이트웨이(OpenAI 호환)를 직접 호출한다. `POST {AI_BASE_URL}/v1/chat/completions`, `Authorization: Bearer {AI_API_KEY}`, 기본 모델 `gpt-5.4`, `max_tokens=300`, `temperature=0`.
+- 시스템 프롬프트는 한국 금융·통신 사기 분석가로서 문자·통화 전사본이 스미싱·보이스피싱·스팸인지 판별하고 `{"label": 0|1, "confidence": 0~1, "reason": "..."}` JSON 한 줄로만 답하게 한다. 사용자 입력은 본문 앞 4000자만 보낸다.
+- 응답 본문에서 첫 `{...}`를 정규식으로 추출해 검증한다. `label`은 엄격한 정수 0/1(불리언·문자열 거부), `confidence`는 0~1 실수, `reason`은 공백이 아닌 문자열이다. 실패는 `INVALID_ANALYSIS_RESULT`다.
+- 매핑: `label=1` → `FRAUD`·`requires_attention=true`·위험 수준 `HIGH`(confidence 0.8 이상) 또는 `MEDIUM`, `summary=reason`. `label=0` → `NORMAL`·`requires_attention=false`·`LOW`. 통화 `instructions`는 항상 빈 목록이다. LLM은 `CHILD_IMPERSONATION`을 만들지 않는다.
+- 통화 STT는 `faster-whisper`의 `small` 모델을 백엔드 프로세스 안에서 CPU·int8로 실행한다(`language="ko"`). 모델은 프로세스당 한 번 지연 로딩하며 키가 설정되면 시작 시 백그라운드로 미리 불러온다. 전사본이 비면 정상으로 판정하지 않고 `AI_REQUEST_FAILED`로 처리한다.
+- 문자·음성·전사본·LLM 원문 응답·키·예외 문구는 로그에 남기지 않는다.
 
 ## 5. 파일·시간 제한
 
-- 준비된 시연 파일 한 종류를 지원한다. 허용 형식·최대 바이트 수·AI 호출 시간 제한은 실제 시연 파일과 AI 계약을 확보한 뒤 정한다.
-- 빈 파일은 422, 크기 상한 초과는 413, 미지원 형식은 415로 AI 호출·사건 생성 전에 거부한다.
+- 최대 10 MiB(`MAX_AUDIO_BYTES`)다. 허용 형식 검사는 적용하지 않으며 PyAV가 해석할 수 있는 형식은 모두 STT로 넘긴다.
+- 빈 파일은 422, 크기 상한 초과는 413 `AUDIO_TOO_LARGE`로 AI 호출·사건 생성 전에 거부한다. 미지원 형식 415는 이번에 적용하지 않는다.
+- 게이트웨이 호출 시간 제한은 `AI_TIMEOUT_SECONDS`(기본 30초)이며 재시도하지 않는다. STT 실행에는 시간 제한이 없다.
 - 크기는 실제 읽은 바이트를 기준으로 제한한다. 원본 보관소나 추가 녹음 저장 테이블은 만들지 않는다.
 - 크기 검사를 위해 파일을 읽은 뒤에는 `await file.seek(0)`을 호출한다. `analyze_call(file)`에는 처음부터 읽을 수 있는 파일을 전달한다.
 - 요청 처리 중 사용하는 업로드 파일은 성공·예외 경로 모두 닫고, AI 호출은 비동기 HTTP 요청으로 처리한다.
 - 서버 강제 종료·클라이언트 연결 중단 이후 결과 전달·작업 복구는 보장하지 않는다. 정상 실행 중 포착한 AI 오류·시간 초과는 실패 기록 대상으로 한다.
 
-제한값은 아직 확정되지 않았다. 긴 녹음 지원이나 별도 진행률 API로 범위를 넓히지 않는다.
+크기 외 제한은 확정하지 않았다. 긴 녹음 지원이나 별도 진행률 API로 범위를 넓히지 않는다.
 
 ## 6. 오류 응답
 
@@ -161,6 +167,8 @@ DB 모델·마이그레이션은 추가하지 않고 기존 사건·확인·알�
 HTTP 클라이언트는 현재 테스트에서 사용하는 `httpx`를 후보로 둔다. 직접 의존성 추가가 필요하면 구현 영향 범위에 `pyproject.toml`·`uv.lock`을 명시하고 `uv add`로 반영한다.
 1차 구현에서는 의존성·DB 모델·마이그레이션·`.env`를 변경하지 않았다. AI 설정 필드와 HTTP 클라이언트 추가는 실제 계약 연결 단계로 남긴다.
 
+실제 AI 연결(11절)에서 `faster-whisper`와 `av>=15,<17`을 `uv add`로 추가했다. av 신버전은 faster-whisper와 `metadata_errors` TypeError로 충돌하므로 상한을 유지한다. HTTP 클라이언트는 `httpx`를 그대로 사용한다.
+
 ## 8. 검증과 남은 확인
 
 자동 검증은 AI 클라이언트 반환값·예외를 주입하고 테스트 전용 PostgreSQL에서 진행한다.
@@ -193,3 +201,15 @@ HTTP 클라이언트는 현재 테스트에서 사용하는 `httpx`를 후보로
 - `EventService.create_alert()`와 `AnalysisService.check_alert()` 분기를 추가했다. 문자 원문·요약·예외 문구는 로그에 남기지 않는다.
 - 자녀 공개 조건은 SPEC-005 14절을 따른다. 모델·마이그레이션·의존성은 변경하지 않았다.
 - 검증: 위험 문자 사건 저장값, 확인·알림 요청 0건, 자녀별 `RISK_WARNING` 발송, 발송 실패 시 사건·200 유지와 로그 비노출. 독립 PostgreSQL 18 전체 `212 passed`, Ruff 통과.
+
+## 11. 실제 AI 연결 (2026-10-31)
+
+사용자 결정: 백엔드가 게이트웨이를 직접 호출하고(별도 AI 서버 없음), 0/1 판정을 그대로 사용하며(`CHILD_IMPERSONATION` 미생성), STT는 faster-whisper `small`을 CPU·int8로 백엔드 안에서 실행한다.
+
+- `app/core/ai.py`: `AIClient`를 게이트웨이 호출·응답 검증·STT로 구현했다. 키 없이 `AIClient()`를 만들면 기존처럼 503 `AI_NOT_CONFIGURED`다. 시간 초과는 `TimeoutError`, 그 외 HTTP·응답 구조 오류와 STT 실패·빈 전사본은 `AIRequestError`(`ConnectionError` 하위)로 `AnalysisService`가 `AI_REQUEST_FAILED`로 변환한다. 판정 검증 실패는 pydantic `ValidationError`로 `INVALID_ANALYSIS_RESULT`가 된다.
+- `app/core/config.py`·`.env.example`·`compose.yaml`: `AI_API_KEY`·`AI_BASE_URL`·`AI_MODEL`·`AI_TIMEOUT_SECONDS`·`STT_MODEL`. 빈 값은 무시되어 기본값을 쓴다. `Dockerfile`은 `/home/app/.cache/huggingface`를 `app` 소유로 만들고 `stt_cache` 볼륨으로 모델 다운로드를 유지한다.
+- `app/api/dependencies.py`: `get_ai_client`·`AIClientDep`. `app/main.py`: 키가 있으면 STT 모델을 백그라운드로 미리 불러오고 실패는 `stt_warmup_failed error_type=`만 기록한다.
+- `app/services/analysis.py`: 10 MiB 초과 413 `AUDIO_TOO_LARGE`.
+- 테스트: `tests/test_ai.py` 신규(`httpx.MockTransport`·가짜 전사 함수, 네트워크·모델 다운로드 없음)와 API 연동·413. 독립 PostgreSQL 18 전체 `239 passed`, Ruff 통과.
+- 미검증: 실제 게이트웨이 호출, 실제 Whisper 로딩·전사 시간(첫 실행 시 모델 다운로드), 컨테이너 볼륨 권한.
+- 미정의 사례: 전사 중 클라이언트 연결이 끊겨도 스레드는 계속 실행된다. 동시 통화 요청은 CPU를 공유하며 제한이 없다. STT 중 사건은 `PROCESSING`으로 남는다.

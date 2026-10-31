@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     auth_secret: SecretStr = Field(min_length=32)
     auth_token_lifetime_seconds: int = Field(default=3600, gt=0)
     invitation_base_url: AnyUrl | None = None
+    ai_api_key: SecretStr | None = None
+    ai_base_url: AnyUrl = AnyUrl("https://copa.codyssey.kr")
+    ai_model: str = "gpt-5.4"
+    ai_timeout_seconds: float = Field(default=30, gt=0)
+    stt_model: str = "small"
 
     @property
     def database_url(self) -> URL:

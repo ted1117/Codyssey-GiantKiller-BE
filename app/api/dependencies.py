@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from app.core.ai import AIClient
+from app.core.config import SettingsDep
 from app.core.database import SessionDep, session_factory
 from app.services.analysis import AnalysisService
 from app.services.app_install import AppInstallService
@@ -55,9 +56,26 @@ VerificationServiceDep = Annotated[
 ]
 
 
-def get_analysis_service(session: SessionDep, push: PushServiceDep) -> AnalysisService:
-    """미설정 AI 클라이언트와 기존 알림 서비스를 주입합니다."""
-    return AnalysisService(session, AIClient(), push)
+def get_ai_client(settings: SettingsDep) -> AIClient:
+    """설정에서 AI 클라이언트를 만듭니다. 키가 없으면 미설정 상태입니다."""
+    key = settings.ai_api_key
+    return AIClient(
+        key.get_secret_value() if key else None,
+        base_url=str(settings.ai_base_url),
+        model=settings.ai_model,
+        timeout=settings.ai_timeout_seconds,
+        stt_model=settings.stt_model,
+    )
+
+
+AIClientDep = Annotated[AIClient, Depends(get_ai_client)]
+
+
+def get_analysis_service(
+    session: SessionDep, push: PushServiceDep, ai: AIClientDep
+) -> AnalysisService:
+    """AI 클라이언트와 기존 알림 서비스를 주입합니다."""
+    return AnalysisService(session, ai, push)
 
 
 AnalysisServiceDep = Annotated[AnalysisService, Depends(get_analysis_service)]
