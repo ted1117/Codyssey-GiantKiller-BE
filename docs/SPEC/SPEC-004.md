@@ -132,7 +132,7 @@ verification_id   UUID | None
 ```
 
 `PushMessageType`은 스키마의 ENUM으로 정의한다. 기존 DB ENUM을 확장하지 않는다.
-일반 유형은 `RISK_WARNING`, `CALL_SUMMARY`, 가족 확인 유형은 기존 5종 이름을 그대로 사용한다.
+일반 유형은 `RISK_WARNING`, `CALL_SUMMARY`, `CALL_WARNING`, 가족 확인 유형은 기존 5종 이름을 그대로 사용한다.
 가족 확인 유형에는 `verification_id`가 필수이며, 일반 유형에서는 생략한다.
 제목·본문·응답 액션은 서버의 유형별 고정 매핑에서 생성한다.
 
@@ -140,6 +140,7 @@ verification_id   UUID | None
 
 - `RISK_WARNING`: 제목 '위험 주의 안내', 본문 '주의가 필요한 상황이에요. 앱에서 내용을 확인해주세요.'
 - `CALL_SUMMARY`: 제목 '통화 요약 안내', 본문 '확인할 통화 요약이 있어요. 앱에서 확인해주세요.'
+- `CALL_WARNING`: 제목 '전화 내용이 위험해 보여요', 본문 '전화로 시킨 일은 멈춰주세요. 돈을 보내거나 앱을 설치하지 마세요.' 수신자는 위험·의심 통화를 업로드한 부모 한 명이며, data는 `event_id`·`push_type`만 보낸다(`verification_id`·`actions` 없음). Android 앱은 `push_type == "CALL_WARNING"`을 처리할 때만 경고 오버레이를 띄우고, 처리하지 않으면 백그라운드에서 시스템 알림으로 표시된다.
 - `VERIFY_REQUEST`: 제목 '메시지 발송 확인 요청', 본문 '부모님이 받은 메시지를 직접 보내셨는지 확인해주세요.'
 - `VERIFY_WAITING`: 제목 '가족에게 확인 중이에요', 본문 '송금·앱 설치·인증번호 전달을 잠시 멈춰주세요.'
 - `VERIFY_CONFIRMED`: 제목 '자녀가 발송을 확인했어요', 본문 '메시지나 링크의 안전을 보장하는 것은 아니에요.'

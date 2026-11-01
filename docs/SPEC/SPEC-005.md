@@ -168,7 +168,7 @@ PENDING → PROCESSING → COMPLETED
 2. 사건 결과·지시 저장을 commit한 뒤 DB 잠금을 해제한다.
 3. 각 자녀에게 `PushSend(user_id, event_id, message_type=CALL_SUMMARY)`를 전달해 기존 `PushService.send()`를 한 번 호출한다.
 
-- 수신자는 사건 가족의 모든 자녀다. 다른 가족·부모에게 이 경로로 발송하지 않는다.
+- `CALL_SUMMARY` 수신자는 사건 가족의 모든 자녀다. 같은 commit 이후 통화를 업로드한 부모(`parent_member_id`, 같은 가족 소속일 때만)에게는 별도로 `CALL_WARNING`을 한 번 보낸다. 자녀에게 `CALL_WARNING`을, 부모에게 `CALL_SUMMARY`를 보내지 않으며 다른 가족·다른 부모에게도 발송하지 않는다. 각 발송 실패는 개별 기록하고 계속 진행한다.
 - 정상 결과와 검증된 위험·의심 결과가 없는 대기·진행·실패 상태에서는 호출하지 않는다.
 - FCM에는 기존 고정 문구와 사건 ID·메시지 유형만 보낸다. 요약·지시·전화번호·원본 녹음을 추가하지 않는다.
 - 자녀가 없거나 활성 계정·등록 FID가 없으면 발송을 건너뛴다. 기존 `PushService`의 비활성 사용자·무효 FID 처리와 성공/실패 집계를 재사용한다.

@@ -22,7 +22,7 @@ _FAILURE_CODES = {"AI_REQUEST_FAILED", "INVALID_ANALYSIS_RESULT"}
 
 
 class EventService:
-    """통화 분석 상태와 결과를 저장하고 commit 후 자녀에게 알립니다."""
+    """통화 분석 상태와 결과를 저장하고 commit 후 자녀와 업로드한 부모에게 알립니다."""
 
     def __init__(self, session: AsyncSession, push: PushService) -> None:
         """저장 세션과 독립 발송 서비스를 주입받습니다."""
@@ -74,6 +74,7 @@ class EventService:
     ) -> None:
         """분석 결과·지시 저장을 확정한 뒤 위험·의심 통화만 알립니다."""
         targets = []
+        parent_user_id = None
         async with transaction(self.session):
             event = await self._require_state(event_id, AnalysisStatus.PROCESSING)
             await self.events.complete_analysis(
@@ -90,14 +91,20 @@ class EventService:
                     for m in await self.members.list_by_family(event.family_id)
                     if m.role == FamilyRole.CHILD
                 ]
+                parent = await self.members.get_by_id(event.parent_member_id)
+                if parent is not None and parent.family_id == event.family_id:
+                    parent_user_id = parent.user_id
         logger.info("call_analysis_completed event_id=%s", event_id)
-        for user_id in targets:
+        pushes = [(user_id, PushMessageType.CALL_SUMMARY) for user_id in targets]
+        if parent_user_id is not None:
+            pushes.append((parent_user_id, PushMessageType.CALL_WARNING))
+        for user_id, message_type in pushes:
             try:
                 await self.push.send(
                     PushSend(
                         user_id=user_id,
                         event_id=event_id,
-                        message_type=PushMessageType.CALL_SUMMARY,
+                        message_type=message_type,
                     )
                 )
             except Exception as error:
