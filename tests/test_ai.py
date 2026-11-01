@@ -353,3 +353,125 @@ def test_get_ai_client_passes_stt_settings() -> None:
         _env_file=None, stt_device="cuda", stt_compute_type="float16", **base
     )
     assert get_ai_client(gpu).transcribe is not None
+
+
+DEFAULT_USER = "다음 내용을 판별하세요.\n\n<내용>\n{}\n</내용>"
+
+
+def make_rag(
+    shots_handler=None, *, rag_url: str | None = "http://rag.test:8100/"
+) -> tuple[AIClient, list[httpx.Request], list[httpx.Request]]:
+    gateway: list[httpx.Request] = []
+    rag: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/shots":
+            rag.append(request)
+            return shots_handler(request)
+        gateway.append(request)
+        return httpx.Response(200, json=reply(verdict("NORMAL")))
+
+    client = AIClient(
+        "key-1",
+        base_url="https://gw.test",
+        rag_url=rag_url,
+        rag_k=5,
+        transport=httpx.MockTransport(handler),
+        transcribe=lambda file: "통화 내용",
+    )
+    return client, gateway, rag
+
+
+def user_content(request: httpx.Request) -> str:
+    return json.loads(request.content)["messages"][1]["content"]
+
+
+def test_rag_off_by_default() -> None:
+    """rag_url이 없으면 /shots를 호출하지 않고 사용자 메시지가 기존과 같습니다."""
+    client, gateway, rag = make_rag(rag_url=None)
+    asyncio.run(client.analyze_alert("본문"))
+    assert rag == []
+    assert user_content(gateway[0]) == DEFAULT_USER.format("본문")
+
+
+def test_rag_shots_in_prompt() -> None:
+    """참고 사례가 사기·정상 순으로 160자까지 들어가고 원문 블록은 유지됩니다."""
+    long = "가" * 200
+
+    def shots(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "shots": [
+                    {"text": "정상 낮음", "label": 0, "sim": 0.5, "extra": 1},
+                    {"text": long, "label": 1, "sim": 0.7},
+                    {"text": "정상\n높음", "label": 0, "sim": 0.9},
+                    {"text": "사기 높음", "label": 1, "sim": 0.8},
+                ]
+            },
+        )
+
+    client, gateway, rag = make_rag(shots)
+    asyncio.run(client.analyze_alert("본문"))
+    asyncio.run(client.analyze_call(UploadFile(BytesIO(b"a"))))
+    content = user_content(gateway[0])
+    assert content.startswith("다음 내용을 판별하세요.\n아래 참고 사례는")
+    assert (
+        "<참고 사례>\n[사기] 사기 높음\n[사기] " + "가" * 160 + "\n[정상] 정상 높음"
+        in (content)
+    )
+    assert "가" * 161 not in content
+    assert content.index("[정상] 정상 높음") < content.index("[정상] 정상 낮음")
+    assert content.endswith("</참고 사례>\n\n<내용>\n본문\n</내용>")
+    assert [r.url.path for r in rag] == ["/shots", "/shots"]
+    first, second = (json.loads(r.content) for r in rag)
+    assert (first["sms"], first["k"], first["text"]) == (True, 5, "본문")
+    assert (second["sms"], second["k"]) == (False, 5)
+    assert str(rag[0].url) == "http://rag.test:8100/shots"
+
+
+def _timeout(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+@pytest.mark.parametrize(
+    "shots_handler",
+    [
+        lambda r: httpx.Response(500, text="SECRET"),
+        lambda r: httpx.Response(200, text="SECRET not json"),
+        lambda r: httpx.Response(200, json={"shots": [{"text": "SECRET", "label": 2}]}),
+        _timeout,
+    ],
+)
+def test_rag_failure_falls_back(
+    shots_handler, caplog: pytest.LogCaptureFixture
+) -> None:
+    """RAG 실패는 기존 사용자 메시지로 판정을 계속하고 경고만 남깁니다."""
+    client, gateway, _ = make_rag(shots_handler)
+    with caplog.at_level("INFO", logger="app.core.ai"):
+        result = asyncio.run(client.analyze_alert("본문"))
+    assert result.classification == "NORMAL"
+    assert user_content(gateway[0]) == DEFAULT_USER.format("본문")
+    assert "rag_unavailable error_type=" in caplog.text
+    assert "SECRET" not in caplog.text and "본문" not in caplog.text
+    assert "rag_shots_used" not in caplog.text
+
+
+def test_get_ai_client_passes_rag_settings() -> None:
+    """설정의 RAG 값이 AI 클라이언트로 전달되고 기본은 꺼짐입니다."""
+    from app.api.dependencies import get_ai_client
+    from app.core.config import Settings
+
+    base = {"postgres_password": "p", "auth_secret": "s" * 32}
+    off = get_ai_client(Settings(_env_file=None, **base))
+    assert (off.rag_url, off.rag_k, off.rag_timeout) == (None, 3, 3)
+    on = get_ai_client(
+        Settings(
+            _env_file=None,
+            rag_url="http://10.1.2.31:8100",
+            rag_k=4,
+            rag_timeout_seconds=1.5,
+            **base,
+        )
+    )
+    assert (on.rag_url, on.rag_k, on.rag_timeout) == ("http://10.1.2.31:8100", 4, 1.5)

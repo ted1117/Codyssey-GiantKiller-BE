@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     ai_base_url: AnyUrl = AnyUrl("https://copa.codyssey.kr")
     ai_model: str = "gpt-5.4"
     ai_timeout_seconds: float = Field(default=30, gt=0)
+    rag_url: AnyUrl | None = None
+    rag_k: int = Field(default=3, ge=1, le=10)
+    rag_timeout_seconds: float = Field(default=3, gt=0)
     stt_model: str = "small"
     stt_device: str = "cpu"
     stt_compute_type: str = "int8"
