@@ -140,7 +140,7 @@ verification_id   UUID | None
 
 - `RISK_WARNING`: 제목 '위험 주의 안내', 본문 '주의가 필요한 상황이에요. 앱에서 내용을 확인해주세요.'
 - `CALL_SUMMARY`: 제목 '통화 요약 안내', 본문 '확인할 통화 요약이 있어요. 앱에서 확인해주세요.'
-- `CALL_WARNING`: 제목 '전화 내용이 위험해 보여요', 본문 '전화로 시킨 일은 멈춰주세요. 돈을 보내거나 앱을 설치하지 마세요.' 수신자는 위험·의심 통화를 업로드한 부모 한 명이며, data는 `event_id`·`push_type`만 보낸다(`verification_id`·`actions` 없음). Android 앱은 `push_type == "CALL_WARNING"`을 처리할 때만 경고 오버레이를 띄우고, 처리하지 않으면 백그라운드에서 시스템 알림으로 표시된다.
+- `CALL_WARNING`: 제목 '전화 내용이 위험해 보여요', 본문 '전화로 시킨 일은 멈춰주세요. 돈을 보내거나 앱을 설치하지 마세요.' 수신자는 위험·의심 통화를 업로드한 부모 한 명이며, notification 없이 data만 담은 높은 우선순위(Android priority high) 메시지로 보내며, data는 `push_type`·`event_id`·`title`·`body`다(`verification_id`·`actions` 없음). 앱이 백그라운드여도 `onMessageReceived`가 실행되어 경고 오버레이를 띄운다. 앱은 항상 무언가를 표시해야 한다. 오버레이를 띄울 수 없으면 `title`·`body`로 직접 알림을 만들어야 하며, 아무것도 표시하지 않는 높은 우선순위 data 메시지는 Android가 우선순위를 낮출 수 있다. 강제 종료된 앱에는 data 전용 메시지가 전달되지 않는다.
 - `VERIFY_REQUEST`: 제목 '메시지 발송 확인 요청', 본문 '부모님이 받은 메시지를 직접 보내셨는지 확인해주세요.'
 - `VERIFY_WAITING`: 제목 '가족에게 확인 중이에요', 본문 '송금·앱 설치·인증번호 전달을 잠시 멈춰주세요.'
 - `VERIFY_CONFIRMED`: 제목 '자녀가 발송을 확인했어요', 본문 '메시지나 링크의 안전을 보장하는 것은 아니에요.'
