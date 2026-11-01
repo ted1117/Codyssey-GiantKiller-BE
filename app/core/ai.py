@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import threading
 from collections.abc import Callable
@@ -25,6 +26,9 @@ SYSTEM_PROMPT = """\
 HIGH_CONFIDENCE = 0.8
 MAX_INPUT_CHARS = 4000
 
+logger = logging.getLogger(__name__)
+SHOT_CHARS = 160
+
 _JSON_OBJECT = re.compile(r"\{.*\}", re.S)
 _stt_models: dict[tuple[str, str, str], Any] = {}
 _stt_lock = threading.Lock()
@@ -48,6 +52,15 @@ class _Verdict(BaseModel):
         if not value.strip():
             raise ValueError("근거는 비어 있을 수 없습니다")
         return value
+
+
+class _Shot(BaseModel):
+    """RAG 서버가 반환한 유사 사례입니다."""
+
+    model_config = ConfigDict(extra="ignore")
+    text: str
+    label: Literal[0, 1]
+    sim: float
 
 
 def _load(name: str, device: str, compute_type: str) -> Any:
@@ -85,6 +98,9 @@ class AIClient:
         base_url: str = "https://copa.codyssey.kr",
         model: str = "gpt-5.4",
         timeout: float = 30,
+        rag_url: str | None = None,
+        rag_k: int = 3,
+        rag_timeout: float = 3,
         stt_model: str = "small",
         stt_device: str = "cpu",
         stt_compute_type: str = "int8",
@@ -97,22 +113,51 @@ class AIClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.rag_url = rag_url.rstrip("/") if rag_url else None
+        self.rag_k = rag_k
+        self.rag_timeout = rag_timeout
         self.transport = transport
         self.transcribe = transcribe or (
             lambda file: _transcribe(stt_model, file, stt_device, stt_compute_type)
         )
 
-    async def _classify(self, text: str) -> _Verdict:
+    async def _shots(self, text: str, sms: bool) -> list[_Shot]:
+        """RAG 서버에서 유사 사례를 가져옵니다. 실패하면 빈 목록입니다."""
+        if self.rag_url is None:
+            return []
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.rag_timeout, transport=self.transport
+            ) as client:
+                response = await client.post(
+                    f"{self.rag_url}/shots",
+                    json={"text": text[:MAX_INPUT_CHARS], "sms": sms, "k": self.rag_k},
+                )
+                response.raise_for_status()
+                raw = response.json()["shots"]
+            return [_Shot.model_validate(item) for item in raw]
+        except Exception as error:
+            logger.warning("rag_unavailable error_type=%s", type(error).__name__)
+            return []
+
+    async def _classify(self, text: str, sms: bool) -> _Verdict:
         """게이트웨이에 한 번 요청해 3분류 판정을 검증합니다."""
+        shots = await self._shots(text, sms)
+        content = (
+            f"다음 내용을 판별하세요.\n\n<내용>\n{text[:MAX_INPUT_CHARS]}\n</내용>"
+        )
+        if shots:
+            content = _with_shots(text[:MAX_INPUT_CHARS], shots)
+            logger.info(
+                "rag_shots_used count=%d max_sim=%.3f",
+                len(shots),
+                max(shot.sim for shot in shots),
+            )
         body = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": "다음 내용을 판별하세요.\n\n"
-                    f"<내용>\n{text[:MAX_INPUT_CHARS]}\n</내용>",
-                },
+                {"role": "user", "content": content},
             ],
             "max_tokens": 300,
             "temperature": 0,
@@ -143,7 +188,9 @@ class AIClient:
         """문자를 분류해 문자 분석 결과로 변환합니다."""
         if not self.configured:
             raise ServiceError(503, "AI_NOT_CONFIGURED")
-        return AlertAnalysisResult.model_validate(_result(await self._classify(text)))
+        return AlertAnalysisResult.model_validate(
+            _result(await self._classify(text, sms=True))
+        )
 
     async def analyze_call(self, file: UploadFile) -> CallAnalysisResult:
         """통화 녹음을 전사한 뒤 분류해 통화 분석 결과로 변환합니다."""
@@ -155,10 +202,26 @@ class AIClient:
             raise AIRequestError from None
         if not transcript.strip():
             raise AIRequestError
-        verdict = await self._classify(transcript)
+        verdict = await self._classify(transcript, sms=False)
         return CallAnalysisResult.model_validate(
             {**_result(verdict), "instructions": []}
         )
+
+
+def _with_shots(text: str, shots: list[_Shot]) -> str:
+    """참고 사례를 포함한 사용자 메시지를 만듭니다. 사기 사례가 먼저 옵니다."""
+    ordered = sorted(shots, key=lambda shot: (-shot.label, -shot.sim))
+    lines = "\n".join(
+        f"[{'사기' if shot.label else '정상'}] "
+        f"{' '.join(shot.text.split())[:SHOT_CHARS]}"
+        for shot in ordered
+    )
+    return (
+        "다음 내용을 판별하세요.\n"
+        "아래 참고 사례는 비슷한 과거 문자·통화와 그 정답(사기/정상)입니다. "
+        "판단에 참고만 하고, 분류 기준과 응답 형식은 그대로 따르세요.\n\n"
+        f"<참고 사례>\n{lines}\n</참고 사례>\n\n<내용>\n{text}\n</내용>"
+    )
 
 
 def _result(verdict: _Verdict) -> dict[str, Any]:

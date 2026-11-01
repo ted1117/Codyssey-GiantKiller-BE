@@ -163,3 +163,23 @@ services:
 ```
 
 `large-v3` 모델(약 3GB)은 첫 기동 때 한 번 내려받아 `stt_cache` 볼륨에 보관한다.
+
+## RAG 참고 사례(선택)
+
+LLM 판정 요청에 비슷한 과거 문자·통화 사례(정답 포함)를 참고로 붙인다. 기본은 꺼짐이며 코드 변경 없이 설정만으로 켜고 끈다.
+시스템 프롬프트, 3분류, 응답 형식은 그대로다. 사례(각 160자 이하, 최대 2천 건 코퍼스)는 LLM 게이트웨이로 전송된다.
+코퍼스 출처는 korean_message(라이선스 미지정)와 합성 사례다.
+
+1. GPU 호스트에서 shots 서버를 띄운다.
+
+```bash
+sudo cp deploy/rag/gk-rag.service /etc/systemd/system/
+sudo systemctl enable --now gk-rag
+curl localhost:8100/health
+```
+
+2. 켜기: `/etc/giantkiller/compose.override.yaml`의 `services.api.environment`에
+   `RAG_URL: http://10.1.2.31:8100`(GPU 호스트 사설 IP)을 추가하고 `deploy/auto-deploy.sh --force`를 실행한다.
+   `RAG_K`(기본 3, 1~10), `RAG_TIMEOUT_SECONDS`(기본 3)로 조정한다.
+3. 끄기: 해당 줄을 지우고 다시 `--force`를 실행한다. shots 서버만 중지해도 백엔드가
+   `RAG_TIMEOUT_SECONDS` 후 사례 없이 자동으로 판정한다(`rag_unavailable` 경고 로그).

@@ -119,6 +119,7 @@ AI 예외 처리 범위는 AI 호출·결과 검증에 한정한다. DB 저장 �
 - 매핑: `CHILD_IMPERSONATION`·`FRAUD` → 같은 이름의 분류·`requires_attention=true`·위험 수준 `HIGH`(confidence 0.8 이상) 또는 `MEDIUM`, `summary=reason`. `NORMAL` → `NORMAL`·`requires_attention=false`·`LOW`. 통화 `instructions`는 항상 빈 목록이다. `CHILD_IMPERSONATION` 문자는 기존 가족 확인 흐름으로, 통화는 해당 분류로 저장된다.
 - 통화 STT는 `faster-whisper`의 `small` 모델을 백엔드 프로세스 안에서 CPU·int8로 실행한다(`language="ko"`). 모델은 프로세스당 한 번 지연 로딩하며 키가 설정되면 시작 시 백그라운드로 미리 불러온다. 전사본이 비면 정상으로 판정하지 않고 `AI_REQUEST_FAILED`로 처리한다.
 - 문자·음성·전사본·LLM 원문 응답·키·예외 문구는 로그에 남기지 않는다.
+- 선택 RAG(기본 꺼짐): `RAG_URL`이 설정되면 판정 전에 `POST {RAG_URL}/shots` `{"text", "sms", "k"}`(본문 앞 4000자, 문자 `sms=true`, 통화 `false`, `RAG_K` 기본 3, `RAG_TIMEOUT_SECONDS` 기본 3)로 `{"shots": [{"text", "label": 0|1, "sim"}]}`을 받는다. 사례가 있으면 사용자 메시지에 `<참고 사례>` 블록(`[사기]` 먼저, `[정상]` 나중, 각 sim 내림차순, 사례당 160자·개행은 공백)을 추가하며 시스템 프롬프트·분류·응답 스키마는 같다. 시간 초과·HTTP 오류·응답 검증 실패는 `rag_unavailable` 경고만 남기고 사례 없이 기존 요청으로 판정한다. 사례 원문은 로그에 남기지 않는다.
 
 ## 5. 파일·시간 제한
 

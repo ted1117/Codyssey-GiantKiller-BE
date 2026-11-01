@@ -276,3 +276,7 @@ docker compose --env-file /dev/null config --quiet
 ## FCM data 키 변경 (2026-10-31)
 
 - 결정: 실기기 발송이 `InvalidArgumentError: Invalid data payload key: message_type`로 실패해 FCM data 키를 `push_type`으로 변경했다. `message_type`은 FCM 예약 키다. 앱은 `data["push_type"]`을 읽어야 한다. 내부 `PushSend.message_type`, enum, DB 컬럼은 유지했다.
+
+## RAG 참고 사례 (2026-11-01)
+
+- 선택적 RAG 참고 사례 — `RAG_URL` 설정 시에만 LLM 요청에 유사 사례를 첨부, 기본 꺼짐, 실패 시 기존 판정으로 폴백. GPU 호스트용 `deploy/rag/shots_server.py` 추가.

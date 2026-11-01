@@ -1,0 +1,14 @@
+[Unit]
+Description=GiantKiller RAG shots server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ncloud
+WorkingDirectory=/home1/ncloud/smishing/model
+ExecStart=/home1/ncloud/smishing/.venv/bin/python /home1/ncloud/Codyssey-GiantKiller-BE/deploy/rag/shots_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
