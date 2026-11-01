@@ -280,3 +280,9 @@ docker compose --env-file /dev/null config --quiet
 ## RAG 참고 사례 (2026-11-01)
 
 - 선택적 RAG 참고 사례 — `RAG_URL` 설정 시에만 LLM 요청에 유사 사례를 첨부, 기본 꺼짐, 실패 시 기존 판정으로 폴백. GPU 호스트용 `deploy/rag/shots_server.py` 추가.
+
+## 통화 위험 시 부모 경고 (2026-11-01)
+
+- 위험·의심 통화 분석 완료 시 업로드한 부모에게 `CALL_WARNING` 푸시 추가(자녀 `CALL_SUMMARY` 유지, 정상 통화는 무발송). 앱은 `push_type == "CALL_WARNING"` 처리 시에만 경고 오버레이, 아니면 시스템 알림.
+
+- 2026-11-01: `CALL_WARNING`을 data 전용·Android 높은 우선순위 FCM으로 발송(data에 `title`·`body` 포함), 다른 유형은 기존 notification+data 유지.

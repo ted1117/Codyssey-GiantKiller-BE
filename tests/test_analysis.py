@@ -83,7 +83,7 @@ def test_call_flow(
         assert data["analysis_status"] == ("FAILED" if failed else "COMPLETED")
         row = await session.get(SecurityEvent, UUID(data["event_id"]))
         assert row.analysis_status == data["analysis_status"]
-        assert push.send.await_count == (1 if kind == "risk" else 0)
+        assert push.send.await_count == (2 if kind == "risk" else 0)
         assert "private-error" not in response.text
 
     runner.run(scenario())

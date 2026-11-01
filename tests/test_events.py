@@ -25,7 +25,7 @@ from tests.test_membership import add_family, add_user
 def test_results_and_commit_before_push(
     session: AsyncSession, engine: AsyncEngine, runner: asyncio.Runner, attention: bool
 ) -> None:
-    """정상은 알리지 않고 의심 결과는 commit 후 해당 가족 자녀에게만 보냅니다."""
+    """정상은 알리지 않고 의심 결과는 commit 후 자녀 요약·부모 경고를 보냅니다."""
 
     async def scenario() -> None:
         family, child = await add_family(session)
@@ -34,6 +34,11 @@ def test_results_and_commit_before_push(
         await FamilyMemberRepository(session).create(
             family.id, parent.id, FamilyRole.PARENT
         )
+        other_parent = await add_user(session, "다른부모")
+        await FamilyMemberRepository(session).create(
+            family.id, other_parent.id, FamilyRole.PARENT
+        )
+        parent_user_id = parent.id
         await session.commit()
         targets = []
 
@@ -72,9 +77,15 @@ def test_results_and_commit_before_push(
         assert event.analysis_status == "COMPLETED"
         assert event.requires_attention is attention
         assert event.status == ("OPEN" if attention else "NOT_REQUIRED")
-        assert [m.user_id for m in targets] == ([child.user_id] if attention else [])
-        if targets:
-            assert targets[0].message_type == PushMessageType.CALL_SUMMARY
+        assert [(m.user_id, m.message_type) for m in targets] == (
+            [
+                (child.user_id, PushMessageType.CALL_SUMMARY),
+                (parent_user_id, PushMessageType.CALL_WARNING),
+            ]
+            if attention
+            else []
+        )
+        assert all(m.event_id == event_id for m in targets)
         with pytest.raises(ServiceError, match="EVENT_ANALYSIS_STATE_CONFLICT"):
             await service.complete_analysis(
                 event_id,
@@ -156,7 +167,7 @@ def test_rollback_and_push_failure(
         monkeypatch.setattr(service.instructions, "create_many", original)
         await service.complete_analysis(event_id, result)
         assert row.analysis_status == "COMPLETED"
-        assert push.send.await_count == 2
+        assert push.send.await_count == 3
 
     runner.run(scenario())
     assert "private-error" not in caplog.text
@@ -273,7 +284,9 @@ def test_no_children_and_invalid_inputs(
         assert (
             await session.get(SecurityEvent, event_id)
         ).analysis_status == "COMPLETED"
-        push.send.assert_not_called()
+        # 자녀가 없어도 업로드한 부모에게는 경고만 한 번 보낸다.
+        push.send.assert_awaited_once()
+        assert push.send.await_args.args[0].message_type == PushMessageType.CALL_WARNING
         legacy = await SecurityEventRepository(session).create(
             family_id, member_id, "ALERT", "CHILD_IMPERSONATION", datetime.now(UTC)
         )
@@ -281,5 +294,49 @@ def test_no_children_and_invalid_inputs(
         await session.commit()
         with pytest.raises(ServiceError, match="EVENT_NOT_CALL"):
             await service.start_analysis(legacy_id)
+
+    runner.run(scenario())
+
+
+def test_parent_warning_failure_keeps_result(
+    session: AsyncSession,
+    runner: asyncio.Runner,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """부모 경고 발송 실패는 분석 결과를 바꾸지 않고 코드만 기록합니다."""
+
+    async def scenario() -> None:
+        family, child = await add_family(session)
+        parent = await add_user(session, "부모")
+        await FamilyMemberRepository(session).create(
+            family.id, parent.id, FamilyRole.PARENT
+        )
+        parent_user_id, child_user_id = parent.id, child.user_id
+        await session.commit()
+
+        async def send(message: PushSend) -> None:
+            if message.message_type == PushMessageType.CALL_WARNING:
+                raise RuntimeError("private-error")
+
+        push = AsyncMock()
+        push.send.side_effect = send
+        service = EventService(session, push)
+        event_id = await service.create_call(
+            family.id, parent_user_id, datetime.now(UTC)
+        )
+        await service.start_analysis(event_id)
+        await service.complete_analysis(
+            event_id, CallAnalysisResult(classification="TEST", requires_attention=True)
+        )
+        row = await session.get(SecurityEvent, event_id)
+        assert (row.analysis_status, row.status) == ("COMPLETED", "OPEN")
+        assert [c.args[0].user_id for c in push.send.await_args_list] == [
+            child_user_id,
+            parent_user_id,
+        ]
+        assert f"call_push_failed event_id={event_id} user_id={parent_user_id}" in (
+            caplog.text
+        )
+        assert "RuntimeError" in caplog.text and "private-error" not in caplog.text
 
     runner.run(scenario())

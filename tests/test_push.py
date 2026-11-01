@@ -27,14 +27,22 @@ class FakeFCM(FCMClient):
 
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], str, str, dict[str, str]]] = []
+        self.data_only: list[bool] = []
         self.errors: dict[str, Exception] = {}
         self.failure: Exception | None = None
         self.during_send: Callable[[], Awaitable[None]] | None = None
 
     async def send(
-        self, fids: list[str], title: str, body: str, data: dict[str, str]
+        self,
+        fids: list[str],
+        title: str,
+        body: str,
+        data: dict[str, str],
+        *,
+        data_only: bool = False,
     ) -> messaging.BatchResponse:
         self.calls.append((fids, title, body, data))
+        self.data_only.append(data_only)
         if self.during_send is not None:
             await self.during_send()
         if self.failure is not None:
@@ -89,6 +97,11 @@ def test_message_payloads(
         if kind == PushMessageType.VERIFY_DENIED:
             assert "사칭 확정" not in title + body
         assert "private-fid" not in json.dumps(data)
+        is_call_warning = kind == PushMessageType.CALL_WARNING
+        assert client.data_only == [is_call_warning]
+        assert ("title" in data and "body" in data) == is_call_warning
+        if is_call_warning:
+            assert data["title"] == title and data["body"] == body
 
     runner.run(scenario())
 
@@ -399,3 +412,28 @@ def test_sdk_blocking_io_does_not_block_event_loop(
         assert result.success_count == 1
 
     runner.run(scenario())
+
+
+def test_sdk_message_building_by_data_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """data_only는 notification 없이 높은 우선순위로, 기본은 기존 형태로 만듭니다."""
+    captured: list[messaging.Message] = []
+
+    def send(
+        messages: list[messaging.Message], **kwargs: object
+    ) -> messaging.BatchResponse:
+        captured.extend(messages)
+        return messaging.BatchResponse([])
+
+    monkeypatch.setattr("app.core.fcm._get_app", lambda: object())
+    monkeypatch.setattr(messaging, "send_each", send)
+    data = {"event_id": "event"}
+    FCMClient()._send(["one"], "제목", "안내", data, data_only=True)
+    FCMClient()._send(["two"], "제목", "안내", data)
+    data_message, default_message = captured
+    assert data_message.notification is None
+    assert data_message.android.priority == "high"
+    assert data_message.data == data
+    assert default_message.notification.title == "제목"
+    assert default_message.android is None

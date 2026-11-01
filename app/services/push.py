@@ -20,6 +20,10 @@ _MESSAGES = {
         "통화 요약 안내",
         "확인할 통화 요약이 있어요. 앱에서 확인해주세요.",
     ),
+    PushMessageType.CALL_WARNING: (
+        "전화 내용이 위험해 보여요",
+        "전화로 시킨 일은 멈춰주세요. 돈을 보내거나 앱을 설치하지 마세요.",
+    ),
     PushMessageType.VERIFY_REQUEST: (
         "메시지 발송 확인 요청",
         "부모님이 받은 메시지를 직접 보내셨는지 확인해주세요.",
@@ -45,6 +49,9 @@ _MESSAGES = {
         "위험할 수 있는 앱 설치가 감지됐어요. 바로 부모님께 연락해 주세요.",
     ),
 }
+
+# 앱이 직접 표시하도록 notification 없이 data로만 보내는 유형이다.
+DATA_ONLY_TYPES = frozenset({PushMessageType.CALL_WARNING})
 
 
 class PushService:
@@ -100,6 +107,11 @@ class PushService:
             # message_type은 FCM 예약 data 키라 push_type으로 전달한다.
             "push_type": message.message_type.value,
         }
+        data_only = message.message_type in DATA_ONLY_TYPES
+        if data_only:
+            # 오버레이를 못 띄울 때 앱이 직접 알림을 만들 수 있도록 문구를 함께 보낸다.
+            data["title"] = title
+            data["body"] = body
         if message.verification_id is not None:
             data["verification_id"] = str(message.verification_id)
         if message.message_type == PushMessageType.VERIFY_REQUEST:
@@ -110,7 +122,11 @@ class PushService:
             batch = targets[start : start + 500]
             try:
                 response = await self.client.send(
-                    [fid for _, fid, _ in batch], title, body, data
+                    [fid for _, fid, _ in batch],
+                    title,
+                    body,
+                    data,
+                    data_only=data_only,
                 )
             except Exception as error:
                 # SDK 예외 원문에는 대상 FID이 포함될 수 있다.
